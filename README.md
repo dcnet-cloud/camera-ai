@@ -49,6 +49,50 @@ https://github.com/minhhungtsbd/my_hass_addon_public
 - API key từ provider OpenAI-compatible có hỗ trợ vision.
 - Telegram bot token và chat ID.
 
+## Lấy IP Và Hostname Local
+
+Để cấu hình `go2rtc_url`, cần lấy địa chỉ nội bộ của Home Assistant.
+
+Cách xem trong Home Assistant:
+
+1. Vào **Settings** -> **System** -> **Network**.
+2. Xem phần **The name your instance will have on your network** để lấy hostname.
+3. Nếu hostname là `HomeAssistant-Hung`, URL local thường là:
+
+```text
+http://homeassistant-hung.local:1984
+```
+
+4. Xem phần **Home Assistant URL** -> **Local network** để lấy IP nội bộ, ví dụ:
+
+```text
+http://192.168.1.101:8123
+```
+
+5. Đổi port Home Assistant `8123` sang port go2rtc `1984`:
+
+```text
+http://192.168.1.101:1984
+```
+
+URL snapshot sẽ có dạng:
+
+```text
+http://192.168.1.101:1984/api/frame.jpeg?src=bep
+```
+
+Trong Web UI chỉ điền `go2rtc_url` là base URL:
+
+```text
+http://192.168.1.101:1984
+```
+
+Camera chỉ điền tên stream:
+
+```text
+bep
+```
+
 ## Gọi Từ Automation
 
 Sau khi add-on chạy, gọi API:

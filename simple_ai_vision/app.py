@@ -89,6 +89,16 @@ INDEX_HTML = r"""
       font-weight: 650;
       margin-bottom: 6px;
     }
+    .hint {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 6px;
+    }
+    code {
+      background: rgba(0, 0, 0, .12);
+      border-radius: 4px;
+      padding: 1px 4px;
+    }
     input, textarea {
       width: 100%;
       border: 1px solid var(--line);
@@ -167,47 +177,57 @@ INDEX_HTML = r"""
       <div class="grid">
         <div>
           <label for="go2rtc_url">go2rtc URL</label>
-          <input id="go2rtc_url" autocomplete="off">
+          <input id="go2rtc_url" autocomplete="off" placeholder="http://192.168.1.101:1984 hoặc http://homeassistant-hung.local:1984">
+          <div class="hint">Chỉ nhập base URL, không nhập <code>/api/frame.jpeg?src=...</code>.</div>
         </div>
         <div>
           <label for="ai_base_url">AI Base URL</label>
-          <input id="ai_base_url" autocomplete="off">
+          <input id="ai_base_url" autocomplete="off" placeholder="https://api.openai.com/v1">
         </div>
         <div>
           <label for="ai_model">AI Model</label>
-          <input id="ai_model" autocomplete="off">
+          <input id="ai_model" autocomplete="off" placeholder="gpt-4o-mini">
         </div>
         <div>
           <label for="telegram_chat_id">Telegram Chat ID</label>
-          <input id="telegram_chat_id" autocomplete="off">
+          <input id="telegram_chat_id" autocomplete="off" placeholder="123456789 hoặc -1001234567890">
         </div>
         <div>
           <label for="ai_api_key">AI API Key</label>
-          <input id="ai_api_key" type="password" autocomplete="new-password">
+          <input id="ai_api_key" type="password" autocomplete="new-password" placeholder="sk-...">
         </div>
         <div>
           <label for="telegram_bot_token">Telegram Bot Token</label>
-          <input id="telegram_bot_token" type="password" autocomplete="new-password">
+          <input id="telegram_bot_token" type="password" autocomplete="new-password" placeholder="123456789:ABCDEF...">
         </div>
         <div class="full">
           <label for="prompt">Prompt</label>
-          <textarea id="prompt"></textarea>
+          <textarea id="prompt" placeholder="Bạn đang phân tích ảnh camera an ninh.
+Chỉ mô tả các sự kiện quan trọng liên quan đến an ninh.
+Nếu không có gì quan trọng hãy trả lời NORMAL."></textarea>
         </div>
         <div class="full">
           <label for="keyword_match">Keyword Match, one per line</label>
-          <textarea id="keyword_match"></textarea>
+          <textarea id="keyword_match" placeholder="person
+human
+stranger
+fire
+smoke
+người
+cháy"></textarea>
+          <div class="hint">Mỗi dòng là một keyword hoặc regex. Match không phân biệt chữ hoa/thường.</div>
         </div>
         <div>
           <label for="ai_timeout">AI Timeout</label>
-          <input id="ai_timeout" type="number" min="1">
+          <input id="ai_timeout" type="number" min="1" placeholder="30">
         </div>
         <div>
           <label for="snapshot_timeout">Snapshot Timeout</label>
-          <input id="snapshot_timeout" type="number" min="1">
+          <input id="snapshot_timeout" type="number" min="1" placeholder="10">
         </div>
         <div>
           <label for="telegram_timeout">Telegram Timeout</label>
-          <input id="telegram_timeout" type="number" min="1">
+          <input id="telegram_timeout" type="number" min="1" placeholder="10">
         </div>
       </div>
       <div class="actions">
@@ -218,6 +238,7 @@ INDEX_HTML = r"""
 
     <section class="panel">
       <h2>Cameras</h2>
+      <div class="hint">Nhập đúng tên stream trong go2rtc, ví dụ <code>bep</code>. Addon sẽ gọi <code>{go2rtc_url}/api/frame.jpeg?src=bep</code>.</div>
       <div id="cameraList"></div>
       <div class="actions">
         <button class="secondary" id="addCameraBtn" type="button">Add Camera</button>
@@ -256,7 +277,7 @@ INDEX_HTML = r"""
         row.className = "camera-row";
         const input = document.createElement("input");
         input.value = camera;
-        input.placeholder = "garage";
+        input.placeholder = "bep";
         input.addEventListener("input", () => cameras[index] = input.value);
 
         const test = document.createElement("button");

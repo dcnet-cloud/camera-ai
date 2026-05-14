@@ -54,6 +54,60 @@ snapshot_timeout: 10
 telegram_timeout: 10
 ```
 
+## Lấy IP Và Hostname Local Cho go2rtc
+
+go2rtc API thường chạy ở port `1984`. Log go2rtc sẽ có dòng:
+
+```text
+[api] listen addr=:1984
+```
+
+Cách lấy IP hoặc hostname trong Home Assistant:
+
+1. Vào **Settings** -> **System** -> **Network**.
+2. Xem **The name your instance will have on your network** để lấy hostname.
+3. Nếu hostname là `HomeAssistant-Hung`, thử dùng:
+
+```text
+http://homeassistant-hung.local:1984
+```
+
+4. Xem **Home Assistant URL** -> **Local network** để lấy IP nội bộ, ví dụ:
+
+```text
+http://192.168.1.101:8123
+```
+
+5. Đổi port `8123` thành `1984`:
+
+```text
+http://192.168.1.101:1984
+```
+
+Trong Web UI, trường `go2rtc_url` chỉ nhập base URL:
+
+```text
+http://192.168.1.101:1984
+```
+
+Không nhập nguyên URL snapshot:
+
+```text
+http://192.168.1.101:1984/api/frame.jpeg?src=bep
+```
+
+Camera chỉ nhập tên stream:
+
+```text
+bep
+```
+
+Addon sẽ tự ghép thành:
+
+```text
+http://192.168.1.101:1984/api/frame.jpeg?src=bep
+```
+
 ## Options
 
 | Option | Mô tả |
