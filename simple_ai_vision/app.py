@@ -243,6 +243,7 @@ cháy"></textarea>
       <div id="cameraList"></div>
       <div class="actions">
         <button class="secondary" id="addCameraBtn" type="button">Add Camera</button>
+        <button class="secondary" id="saveCamerasBtn" type="button">Save Cameras</button>
       </div>
     </section>
 
@@ -277,9 +278,15 @@ cháy"></textarea>
         });
         let data = {};
         try {
-          data = await response.json();
+          data = await response.clone().json();
         } catch (err) {
-          data = {success: false, error: "invalid JSON response"};
+          const text = await response.text().catch(() => "");
+          data = {
+            success: false,
+            error: "invalid JSON response",
+            status: response.status,
+            response: text.slice(0, 500)
+          };
         }
         return {response, data};
       } finally {
@@ -448,6 +455,7 @@ cháy"></textarea>
     document.getElementById("reloadBtn").addEventListener("click", loadConfig);
     document.getElementById("saveBtn").addEventListener("click", saveConfig);
     document.getElementById("testAiBtn").addEventListener("click", testAiApi);
+    document.getElementById("saveCamerasBtn").addEventListener("click", saveConfig);
     document.getElementById("addCameraBtn").addEventListener("click", () => {
       cameras.push("");
       renderCameras();
@@ -472,6 +480,48 @@ def error_response(message: str, status_code: int = 400, **extra: Any) -> JSONRe
     payload = {"success": False, "error": message}
     payload.update(extra)
     return JSONResponse(payload, status_code=status_code)
+
+
+def provider_error_response(exc: requests.HTTPError) -> JSONResponse:
+    response = exc.response
+    provider_status = response.status_code if response is not None else None
+    provider_body = ""
+    if response is not None:
+        provider_body = response.text[:1000]
+
+    if provider_status == 404:
+        message = "AI API endpoint not found. Check ai_base_url and provider path."
+    elif provider_status == 401:
+        message = "AI API unauthorized. Check ai_api_key."
+    elif provider_status == 403:
+        message = "AI API forbidden. Check key permission or provider access."
+    elif provider_status == 429:
+        message = "AI API rate limited or quota exceeded."
+    else:
+        message = "AI API provider error"
+
+    return JSONResponse(
+        {
+            "success": False,
+            "error": message,
+            "provider_status": provider_status,
+            "provider_response": provider_body,
+        }
+    )
+
+
+def upstream_error_response(exc: requests.HTTPError) -> JSONResponse:
+    response = exc.response
+    upstream_status = response.status_code if response is not None else None
+    upstream_body = response.text[:1000] if response is not None else ""
+    return JSONResponse(
+        {
+            "success": False,
+            "error": "upstream HTTP error",
+            "upstream_status": upstream_status,
+            "upstream_response": upstream_body,
+        }
+    )
 
 
 def default_options() -> dict[str, Any]:
@@ -819,10 +869,13 @@ async def test_ai(request: Request) -> JSONResponse:
         return error_response(str(exc), 400)
     except requests.Timeout:
         logger.error("AI API test timeout")
-        return error_response("AI API timeout", 504)
+        return JSONResponse({"success": False, "error": "AI API timeout"})
+    except requests.HTTPError as exc:
+        logger.error("AI API provider error: %s", exc)
+        return provider_error_response(exc)
     except requests.RequestException as exc:
         logger.error("AI API test network error: %s", exc)
-        return error_response("AI API network error", 502)
+        return JSONResponse({"success": False, "error": "AI API network error", "details": str(exc)})
     except Exception:
         logger.exception("Unexpected AI API test error")
         return error_response("internal error", 500)
@@ -867,10 +920,13 @@ async def analyze(request: Request) -> JSONResponse:
         return error_response(str(exc), 400)
     except requests.Timeout:
         logger.error("Network timeout")
-        return error_response("network timeout", 504)
+        return JSONResponse({"success": False, "error": "network timeout"})
+    except requests.HTTPError as exc:
+        logger.error("Upstream HTTP error: %s", exc)
+        return upstream_error_response(exc)
     except requests.RequestException as exc:
         logger.error("Network error: %s", exc)
-        return error_response("network error", 502)
+        return JSONResponse({"success": False, "error": "network error", "details": str(exc)})
     except Exception as exc:
         logger.exception("Unexpected error")
         return error_response("internal error", 500)
