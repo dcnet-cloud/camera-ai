@@ -159,7 +159,7 @@ INDEX_HTML = r"""
     }
     .camera-head {
       display: grid;
-      grid-template-columns: minmax(120px, 1fr) minmax(160px, 1.3fr) minmax(120px, 1fr) auto auto auto auto;
+      grid-template-columns: minmax(90px, .7fr) minmax(120px, 1fr) minmax(160px, 1.3fr) minmax(120px, 1fr) auto auto auto auto;
       gap: 8px;
       color: var(--muted);
       font-size: 12px;
@@ -168,9 +168,22 @@ INDEX_HTML = r"""
     }
     .camera-row {
       display: grid;
-      grid-template-columns: minmax(120px, 1fr) minmax(160px, 1.3fr) minmax(120px, 1fr) auto auto auto auto;
+      grid-template-columns: minmax(90px, .7fr) minmax(120px, 1fr) minmax(160px, 1.3fr) minmax(120px, 1fr) auto auto auto auto;
       gap: 8px;
       margin-bottom: 8px;
+    }
+    .monitor-toggle {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 40px;
+      color: var(--text);
+      font-weight: 650;
+    }
+    .monitor-toggle input {
+      width: auto;
+      min-width: 18px;
+      height: 18px;
     }
     .entity-picker {
       display: grid;
@@ -446,6 +459,7 @@ cháy"></textarea>
       </div>
       <div id="streamStatus" class="status"></div>
       <div class="camera-head">
+        <div>Monitor</div>
         <div>Name</div>
         <div>HA entity</div>
         <div>go2rtc src</div>
@@ -610,9 +624,10 @@ cháy"></textarea>
 
     function normalizeCamera(camera) {
       if (typeof camera === "string") {
-        return {name: "", entity_id: "", src: camera.trim()};
+        return {enabled: true, name: "", entity_id: "", src: camera.trim()};
       }
       return {
+        enabled: camera?.enabled !== false,
         name: String(camera?.name || "").trim(),
         entity_id: String(camera?.entity_id || "").trim(),
         src: String(camera?.src || "").trim()
@@ -679,6 +694,16 @@ cháy"></textarea>
         const row = document.createElement("div");
         row.className = "camera-row";
 
+        const monitorWrap = document.createElement("label");
+        monitorWrap.className = "monitor-toggle";
+        const monitorInput = document.createElement("input");
+        monitorInput.type = "checkbox";
+        monitorInput.checked = item.enabled;
+        monitorInput.addEventListener("change", () => cameras[index].enabled = monitorInput.checked);
+        const monitorText = document.createElement("span");
+        monitorText.textContent = "Monitor";
+        monitorWrap.append(monitorInput, monitorText);
+
         const nameWrap = document.createElement("div");
         const nameLabel = document.createElement("div");
         nameLabel.className = "mobile-label";
@@ -736,7 +761,7 @@ cháy"></textarea>
           renderCameras();
         });
 
-        row.append(nameWrap, entityWrap, srcWrap, snapshot, video, test, remove);
+        row.append(monitorWrap, nameWrap, entityWrap, srcWrap, snapshot, video, test, remove);
         list.append(row);
       });
       renderLiveCameras();
@@ -867,6 +892,7 @@ cháy"></textarea>
       }
       const selected = select.selectedOptions[0];
       cameras.push({
+        enabled: true,
         name: selected?.dataset.name || "",
         entity_id: value,
         src: ""
@@ -915,7 +941,7 @@ cháy"></textarea>
         setStatus("streamStatus", "Select a go2rtc stream first, or use Add Camera for manual input.", "err");
         return;
       }
-      cameras.push({name: src, entity_id: "", src});
+      cameras.push({enabled: true, name: src, entity_id: "", src});
       renderCameras();
       setStatus("streamStatus", `Added go2rtc stream ${src}`, "ok");
     }
@@ -1127,7 +1153,7 @@ cháy"></textarea>
     document.getElementById("liveLimit").addEventListener("input", renderLiveCameras);
     document.getElementById("refreshEventsBtn").addEventListener("click", loadEvents);
     document.getElementById("addCameraBtn").addEventListener("click", () => {
-      cameras.push({name: "", entity_id: "", src: ""});
+      cameras.push({enabled: true, name: "", entity_id: "", src: ""});
       renderCameras();
     });
     document.getElementById("closeViewerBtn").addEventListener("click", () => {
@@ -1288,9 +1314,10 @@ def normalize_camera_list(cameras: list[Any]) -> list[dict[str, str]]:
     normalized = []
     for camera in cameras:
         if isinstance(camera, str):
-            item = {"name": "", "entity_id": "", "src": camera.strip()}
+            item = {"enabled": True, "name": "", "entity_id": "", "src": camera.strip()}
         elif isinstance(camera, dict):
             item = {
+                "enabled": camera.get("enabled") is not False,
                 "name": str(camera.get("name", "")).strip(),
                 "entity_id": str(camera.get("entity_id", "")).strip(),
                 "src": str(camera.get("src", "")).strip(),
@@ -1328,6 +1355,21 @@ def validate_saved_options(options: dict[str, Any]) -> None:
             raise ValueError(f"{key} must be an integer") from exc
         if options[key] < 1:
             raise ValueError(f"{key} must be greater than 0")
+
+
+def find_saved_camera(
+    options: dict[str, Any],
+    camera: str | None,
+    entity_id: str | None,
+) -> dict[str, str] | None:
+    for item in options.get("cameras", []):
+        if not isinstance(item, dict):
+            continue
+        if camera and item.get("src") == camera:
+            return item
+        if entity_id and item.get("entity_id") == entity_id:
+            return item
+    return None
 
 
 def validate_options(options: dict[str, Any]) -> None:
@@ -1947,6 +1989,23 @@ async def analyze(request: Request) -> JSONResponse:
         options = load_options()
         camera_value = str(body.get("camera", "")).strip()
         entity_value = str(body.get("entity_id", "")).strip()
+        saved_camera = find_saved_camera(
+            options,
+            camera_value or None,
+            entity_value or None,
+        )
+        if saved_camera and saved_camera.get("enabled") is False:
+            camera_name = saved_camera.get("src") or saved_camera.get("entity_id") or "camera"
+            record_event(camera_name, "", "disabled")
+            logger.info("Skipping disabled camera=%s", camera_name)
+            return JSONResponse(
+                {
+                    "success": True,
+                    "skipped": True,
+                    "reason": "camera disabled",
+                    "camera": camera_name,
+                }
+            )
 
         snapshot_path, camera = fetch_snapshot_for_source(
             camera_value or None,
