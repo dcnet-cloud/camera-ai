@@ -228,6 +228,44 @@ Các provider thường dùng:
 - 9Router
 - Gemini qua OpenAI-compatible gateway
 
+### 9Router
+
+Theo README của 9Router, endpoint OpenAI-compatible là:
+
+```text
+POST http://localhost:20128/v1/chat/completions
+```
+
+Vì vậy trong Web UI, trường `AI Base URL` chỉ nhập base URL có `/v1`, không nhập `/chat/completions`:
+
+```text
+http://<9router-host>:20128/v1
+```
+
+Ví dụ nếu bạn expose 9Router qua domain:
+
+```text
+https://9router.minhhungtsbd.me/v1
+```
+
+`AI Model` dùng đúng model/combo trong dashboard 9Router, ví dụ:
+
+```text
+cc/claude-opus-4-7
+```
+
+hoặc model/combo bạn đã tạo trong 9Router.
+
+Addon gửi request với:
+
+```json
+{
+  "stream": false
+}
+```
+
+Một số gateway 9Router vẫn có thể trả Server-Sent Events dạng `data: {...}`. Addon hỗ trợ parse cả JSON chuẩn và SSE streaming chunk.
+
 ## Telegram
 
 Add-on gửi ảnh bằng Telegram Bot API `sendPhoto`.

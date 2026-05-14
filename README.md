@@ -51,6 +51,20 @@ Add-on này dùng Web UI làm nơi cấu hình chính. Tab Configuration của H
 - API key từ provider OpenAI-compatible có hỗ trợ vision.
 - Telegram bot token và chat ID.
 
+Với 9Router, nhập `AI Base URL` dạng:
+
+```text
+http://<9router-host>:20128/v1
+```
+
+hoặc:
+
+```text
+https://9router.minhhungtsbd.me/v1
+```
+
+Không nhập thêm `/chat/completions`; addon tự ghép endpoint này.
+
 ## Lấy IP Và Hostname Local
 
 Để cấu hình `go2rtc_url`, cần lấy địa chỉ nội bộ của Home Assistant.

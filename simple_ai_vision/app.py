@@ -182,11 +182,11 @@ INDEX_HTML = r"""
         </div>
         <div>
           <label for="ai_base_url">AI Base URL</label>
-          <input id="ai_base_url" autocomplete="off" placeholder="https://api.openai.com/v1">
+          <input id="ai_base_url" autocomplete="off" placeholder="https://api.openai.com/v1 hoặc http://9router.local:20128/v1">
         </div>
         <div>
           <label for="ai_model">AI Model</label>
-          <input id="ai_model" autocomplete="off" placeholder="gpt-4o-mini">
+          <input id="ai_model" autocomplete="off" placeholder="gpt-4o-mini hoặc cc/claude-opus-4-7">
         </div>
         <div>
           <label for="telegram_chat_id">Telegram Chat ID</label>
@@ -794,6 +794,7 @@ def call_ai(data_url: str, options: dict[str, Any]) -> str:
     headers = {
         "Authorization": f"Bearer {options['ai_api_key']}",
         "Content-Type": "application/json",
+        "Accept": "application/json",
     }
 
     response = requests.post(
@@ -823,6 +824,7 @@ def call_ai_text(options: dict[str, Any]) -> str:
     headers = {
         "Authorization": f"Bearer {options['ai_api_key']}",
         "Content-Type": "application/json",
+        "Accept": "application/json",
     }
 
     response = requests.post(
