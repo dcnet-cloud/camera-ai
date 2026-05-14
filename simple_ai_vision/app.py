@@ -1,4 +1,5 @@
 import base64
+from datetime import datetime, timezone
 import json
 import logging
 import os
@@ -12,6 +13,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 
 UI_OPTIONS_PATH = "/data/simple_ai_vision_config.json"
+EVENT_LOG_PATH = "/data/simple_ai_vision_events.jsonl"
 DEFAULT_PROMPT = (
     "B\u1ea1n \u0111ang ph\u00e2n t\u00edch \u1ea3nh camera an ninh.\n"
     "Ch\u1ec9 m\u00f4 t\u1ea3 c\u00e1c s\u1ef1 ki\u1ec7n quan tr\u1ecdng li\u00ean quan \u0111\u1ebfn an ninh.\n"
@@ -167,6 +169,51 @@ INDEX_HTML = r"""
       gap: 8px;
       margin: 12px 0 14px;
     }
+    .live-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 14px;
+    }
+    .live-item {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: rgba(0, 0, 0, .04);
+    }
+    .live-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 10px;
+      font-weight: 750;
+    }
+    .live-title span {
+      color: var(--muted);
+      font-weight: 600;
+      overflow-wrap: anywhere;
+    }
+    .live-item iframe {
+      display: block;
+      width: 100%;
+      height: 260px;
+      border: 0;
+      background: #05080c;
+    }
+    .events-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    .events-table th,
+    .events-table td {
+      border-bottom: 1px solid var(--line);
+      padding: 9px 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+    .events-table td {
+      overflow-wrap: anywhere;
+    }
     select {
       width: 100%;
       border: 1px solid var(--line);
@@ -249,6 +296,8 @@ INDEX_HTML = r"""
 
     <nav class="tabs" aria-label="Main views">
       <button class="tab-btn active" data-tab="camerasPanel" type="button">Cameras</button>
+      <button class="tab-btn" data-tab="livePanel" type="button">Live</button>
+      <button class="tab-btn" data-tab="eventsPanel" type="button">Sự kiện</button>
       <button class="tab-btn" data-tab="settingsPanel" type="button">Core Settings</button>
     </nav>
 
@@ -328,11 +377,37 @@ cháy"></textarea>
         <button class="secondary" id="addEntityBtn" type="button">Add Selected</button>
       </div>
       <div id="entityStatus" class="status"></div>
+      <div class="entity-picker">
+        <select id="go2rtcStreamSelect">
+          <option value="">Load go2rtc streams...</option>
+        </select>
+        <button class="secondary" id="loadStreamsBtn" type="button">Load go2rtc</button>
+        <button class="secondary" id="addStreamBtn" type="button">Add Stream</button>
+      </div>
+      <div id="streamStatus" class="status"></div>
       <div id="cameraList"></div>
       <div class="actions">
         <button class="secondary" id="addCameraBtn" type="button">Add Camera</button>
         <button class="secondary" id="saveCamerasBtn" type="button">Save Cameras</button>
+        <span id="cameraStatus" class="status"></span>
       </div>
+    </section>
+
+    <section class="panel tab-panel" id="livePanel">
+      <h2>Live</h2>
+      <div class="actions">
+        <button class="secondary" id="refreshLiveBtn" type="button">Refresh Live</button>
+      </div>
+      <div id="liveGrid" class="live-grid"></div>
+    </section>
+
+    <section class="panel tab-panel" id="eventsPanel">
+      <h2>Sự kiện</h2>
+      <div class="actions">
+        <button class="secondary" id="refreshEventsBtn" type="button">Refresh Events</button>
+        <span id="eventsStatus" class="status"></span>
+      </div>
+      <div id="eventsList"></div>
     </section>
 
     <section class="panel">
@@ -379,6 +454,8 @@ cháy"></textarea>
       document.querySelectorAll(".tab-btn").forEach(button => {
         button.classList.toggle("active", button.dataset.tab === panelId);
       });
+      if (panelId === "livePanel") renderLiveCameras();
+      if (panelId === "eventsPanel") loadEvents();
     }
 
     function buildGo2rtcUrl(camera, path, params = {}) {
@@ -453,6 +530,10 @@ cháy"></textarea>
       return item.name || item.entity_id || item.src || "Camera";
     }
 
+    function camerasWithSrc() {
+      return cameras.map(normalizeCamera).filter(camera => camera.src);
+    }
+
     function validateTimeoutInputs() {
       const labels = {
         ai_timeout: "AI Timeout",
@@ -521,6 +602,7 @@ cháy"></textarea>
         row.append(nameInput, entityInput, srcInput, snapshot, video, test, remove);
         list.append(row);
       });
+      renderLiveCameras();
     }
 
     function cameraSrcOrError(camera) {
@@ -625,6 +707,125 @@ cháy"></textarea>
       setStatus("entityStatus", `Added ${value}. Fill go2rtc src before testing.`, "ok");
     }
 
+    function renderGo2rtcStreams(streams) {
+      const select = document.getElementById("go2rtcStreamSelect");
+      select.innerHTML = "";
+      const empty = document.createElement("option");
+      empty.value = "";
+      empty.textContent = streams.length ? "Select go2rtc stream" : "No go2rtc streams found";
+      select.append(empty);
+
+      streams.forEach(stream => {
+        const option = document.createElement("option");
+        option.value = stream.src;
+        option.textContent = stream.name && stream.name !== stream.src
+          ? `${stream.name} (${stream.src})`
+          : stream.src;
+        select.append(option);
+      });
+    }
+
+    async function loadGo2rtcStreams() {
+      setStatus("streamStatus", "Loading go2rtc streams...", "");
+      try {
+        const {response, data} = await requestJson("api/go2rtc/streams", {}, 15000);
+        if (!response.ok || !data.success) {
+          setStatus("streamStatus", data.error || "Could not load go2rtc streams", "err");
+          return;
+        }
+        renderGo2rtcStreams(data.streams || []);
+        setStatus("streamStatus", `Loaded ${(data.streams || []).length} go2rtc streams`, "ok");
+      } catch (err) {
+        setStatus("streamStatus", err.name === "AbortError" ? "go2rtc stream load timeout" : err.message, "err");
+      }
+    }
+
+    function addSelectedStream() {
+      const select = document.getElementById("go2rtcStreamSelect");
+      const src = select.value.trim();
+      if (!src) {
+        setStatus("streamStatus", "Select a go2rtc stream first, or use Add Camera for manual input.", "err");
+        return;
+      }
+      cameras.push({name: src, entity_id: "", src});
+      renderCameras();
+      setStatus("streamStatus", `Added go2rtc stream ${src}`, "ok");
+    }
+
+    function renderLiveCameras() {
+      const grid = document.getElementById("liveGrid");
+      if (!grid) return;
+      grid.innerHTML = "";
+      const items = camerasWithSrc();
+      if (!items.length) {
+        grid.textContent = "No go2rtc src configured.";
+        return;
+      }
+
+      items.forEach(camera => {
+        const item = document.createElement("div");
+        item.className = "live-item";
+
+        const title = document.createElement("div");
+        title.className = "live-title";
+        const name = document.createElement("div");
+        name.textContent = cameraLabel(camera);
+        const src = document.createElement("span");
+        src.textContent = camera.src;
+        title.append(name, src);
+
+        const frame = document.createElement("iframe");
+        frame.src = buildGo2rtcUrl(camera.src, "/stream.html", {mode: "mse"});
+        frame.title = `Live ${cameraLabel(camera)}`;
+        frame.allow = "autoplay; fullscreen; picture-in-picture";
+
+        item.append(title, frame);
+        grid.append(item);
+      });
+    }
+
+    function renderEvents(events) {
+      const list = document.getElementById("eventsList");
+      list.innerHTML = "";
+      if (!events.length) {
+        list.textContent = "No sent alert events yet.";
+        return;
+      }
+
+      const table = document.createElement("table");
+      table.className = "events-table";
+      table.innerHTML = "<thead><tr><th>Time</th><th>Camera</th><th>Analysis</th></tr></thead>";
+      const body = document.createElement("tbody");
+      events.forEach(event => {
+        const row = document.createElement("tr");
+        const time = document.createElement("td");
+        time.textContent = event.time || "";
+        const camera = document.createElement("td");
+        camera.textContent = event.camera || "";
+        const analysis = document.createElement("td");
+        analysis.textContent = event.analysis || "";
+        row.append(time, camera, analysis);
+        body.append(row);
+      });
+      table.append(body);
+      list.append(table);
+    }
+
+    async function loadEvents() {
+      setStatus("eventsStatus", "Loading events...", "");
+      try {
+        const {response, data} = await requestJson("api/events", {}, 15000);
+        if (!response.ok || !data.success) {
+          setStatus("eventsStatus", data.error || "Could not load events", "err");
+          return;
+        }
+        renderEvents(data.events || []);
+        setStatus("eventsStatus", `Loaded ${(data.events || []).length} events`, "ok");
+      } catch (err) {
+        setStatus("eventsStatus", err.name === "AbortError" ? "Event load timeout" : err.message, "err");
+      }
+    }
+
     async function loadConfig() {
       try {
         setStatus("configStatus", "Loading...", "");
@@ -644,33 +845,33 @@ cháy"></textarea>
       }
     }
 
-    async function saveConfig() {
+    async function saveConfig(statusId = "configStatus") {
       let payload;
       try {
         validateTimeoutInputs();
         payload = buildConfigPayload();
       } catch (err) {
-        setStatus("configStatus", err.message, "err");
+        setStatus(statusId, err.message, "err");
         return null;
       }
 
       try {
-        setStatus("configStatus", "Saving...", "");
+        setStatus(statusId, "Saving...", "");
         const {response, data} = await requestJson("api/config", {
           method: "POST",
           headers: {"Content-Type": "application/json"},
           body: JSON.stringify(payload)
         }, 20000);
         if (!response.ok || !data.success) {
-          setStatus("configStatus", data.error || "Save failed", "err");
+          setStatus(statusId, data.error || "Save failed", "err");
           return null;
         }
         cameras = data.config.cameras || [];
         renderCameras();
-        setStatus("configStatus", "Saved", "ok");
+        setStatus(statusId, "Saved", "ok");
         return data.config;
       } catch (err) {
-        setStatus("configStatus", err.name === "AbortError" ? "Save timeout" : err.message, "err");
+        setStatus(statusId, err.name === "AbortError" ? "Save timeout" : err.message, "err");
         return null;
       }
     }
@@ -721,11 +922,15 @@ cháy"></textarea>
     document.querySelectorAll(".tab-btn").forEach(button => {
       button.addEventListener("click", () => setActiveTab(button.dataset.tab));
     });
-    document.getElementById("saveBtn").addEventListener("click", saveConfig);
+    document.getElementById("saveBtn").addEventListener("click", () => saveConfig());
     document.getElementById("testAiBtn").addEventListener("click", testAiApi);
-    document.getElementById("saveCamerasBtn").addEventListener("click", saveConfig);
+    document.getElementById("saveCamerasBtn").addEventListener("click", () => saveConfig("cameraStatus"));
     document.getElementById("loadEntitiesBtn").addEventListener("click", loadHaEntities);
     document.getElementById("addEntityBtn").addEventListener("click", addSelectedEntity);
+    document.getElementById("loadStreamsBtn").addEventListener("click", loadGo2rtcStreams);
+    document.getElementById("addStreamBtn").addEventListener("click", addSelectedStream);
+    document.getElementById("refreshLiveBtn").addEventListener("click", renderLiveCameras);
+    document.getElementById("refreshEventsBtn").addEventListener("click", loadEvents);
     document.getElementById("addCameraBtn").addEventListener("click", () => {
       cameras.push({name: "", entity_id: "", src: ""});
       renderCameras();
@@ -1178,6 +1383,86 @@ def cleanup_file(path: str | None) -> None:
             logger.warning("Could not remove temp file: %s", path)
 
 
+def get_go2rtc_streams(options: dict[str, Any]) -> list[dict[str, str]]:
+    base_url = str(options.get("go2rtc_url", "")).strip().rstrip("/")
+    if not base_url:
+        raise ValueError("go2rtc_url is required")
+
+    response = requests.get(
+        f"{base_url}/api/streams",
+        timeout=options.get("snapshot_timeout", 10),
+    )
+    response.raise_for_status()
+
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise ValueError("go2rtc returned non-JSON response") from exc
+
+    streams: list[dict[str, str]] = []
+    if isinstance(data, dict):
+        for key, value in data.items():
+            src = str(key).strip()
+            if not src:
+                continue
+            name = src
+            if isinstance(value, dict):
+                name = str(value.get("name") or src).strip()
+            streams.append({"src": src, "name": name})
+    elif isinstance(data, list):
+        for item in data:
+            if isinstance(item, str):
+                src = item.strip()
+                name = src
+            elif isinstance(item, dict):
+                src = str(item.get("src") or item.get("name") or "").strip()
+                name = str(item.get("name") or src).strip()
+            else:
+                continue
+            if src:
+                streams.append({"src": src, "name": name})
+    else:
+        raise ValueError("go2rtc returned invalid streams payload")
+
+    return sorted(streams, key=lambda stream: stream["src"])
+
+
+def record_event(camera: str, analysis: str) -> None:
+    event = {
+        "time": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "camera": camera,
+        "analysis": analysis,
+    }
+    os.makedirs(os.path.dirname(EVENT_LOG_PATH), exist_ok=True)
+    with open(EVENT_LOG_PATH, "a", encoding="utf-8") as file:
+        file.write(json.dumps(event, ensure_ascii=False) + "\n")
+
+
+def read_events(limit: int = 100) -> list[dict[str, str]]:
+    if not os.path.exists(EVENT_LOG_PATH):
+        return []
+
+    with open(EVENT_LOG_PATH, "r", encoding="utf-8") as file:
+        lines = file.readlines()[-limit:]
+
+    events = []
+    for line in reversed(lines):
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        events.append(
+            {
+                "time": str(event.get("time", "")),
+                "camera": str(event.get("camera", "")),
+                "analysis": str(event.get("analysis", "")),
+            }
+        )
+    return events
+
+
 def get_hass_camera_entities() -> list[dict[str, str]]:
     token = os.environ.get("SUPERVISOR_TOKEN", "")
     if not token:
@@ -1253,6 +1538,34 @@ def hass_cameras() -> JSONResponse:
     except requests.RequestException as exc:
         logger.error("Home Assistant API network error: %s", exc)
         return JSONResponse({"success": False, "error": "Home Assistant API network error", "details": str(exc)})
+
+
+@app.get("/api/go2rtc/streams")
+def go2rtc_streams() -> JSONResponse:
+    try:
+        options = read_options()
+        return JSONResponse({"success": True, "streams": get_go2rtc_streams(options)})
+    except ValueError as exc:
+        logger.error("%s", exc)
+        return error_response(str(exc), 400)
+    except requests.Timeout:
+        logger.error("go2rtc stream load timeout")
+        return JSONResponse({"success": False, "error": "go2rtc API timeout"})
+    except requests.HTTPError as exc:
+        logger.error("go2rtc API HTTP error: %s", exc)
+        return upstream_error_response(exc)
+    except requests.RequestException as exc:
+        logger.error("go2rtc API network error: %s", exc)
+        return JSONResponse({"success": False, "error": "go2rtc API network error", "details": str(exc)})
+
+
+@app.get("/api/events")
+def events() -> JSONResponse:
+    try:
+        return JSONResponse({"success": True, "events": read_events()})
+    except OSError as exc:
+        logger.error("Could not read events: %s", exc)
+        return error_response("could not read events", 500)
 
 
 @app.get("/api/camera/frame")
@@ -1370,6 +1683,7 @@ async def analyze(request: Request) -> JSONResponse:
 
         if matched:
             send_telegram(camera, analysis, snapshot_path, options)
+            record_event(camera, analysis)
             logger.info("Telegram sent for camera=%s", camera)
         else:
             logger.info("No keyword match for camera=%s", camera)
