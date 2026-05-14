@@ -1,5 +1,5 @@
 name: Simple AI Vision
-version: "1.0.0"
+version: "1.1.0"
 slug: simple_ai_vision
 description: Lightweight AI camera snapshot analyzer using go2rtc and Telegram alerts
 url: "https://github.com/minhhungtsbd/my_hass_addon_public/tree/main/simple_ai_vision"
@@ -10,7 +10,10 @@ startup: application
 boot: auto
 init: false
 host_network: false
-ingress: false
+ingress: true
+ingress_port: 8000
+panel_icon: mdi:cctv
+webui: "http://[HOST]:[PORT:8000]/"
 ports:
   8000/tcp: 8000
 ports_description:
@@ -33,6 +36,8 @@ options:
     - smoke
     - "ng\u01b0\u1eddi"
     - "ch\u00e1y"
+  cameras:
+    - garage
   ai_timeout: 30
   snapshot_timeout: 10
   telegram_timeout: 10
@@ -45,6 +50,8 @@ schema:
   telegram_chat_id: str
   prompt: str
   keyword_match:
+    - str
+  cameras:
     - str
   ai_timeout: int(1,300)
   snapshot_timeout: int(1,120)

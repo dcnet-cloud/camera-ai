@@ -8,7 +8,7 @@ from typing import Any
 
 import requests
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 
 OPTIONS_PATH = "/data/options.json"
@@ -19,6 +19,326 @@ DEFAULT_PROMPT = (
 )
 DEFAULT_KEYWORDS = ["person", "human", "stranger", "fire", "smoke", "ng\u01b0\u1eddi", "ch\u00e1y"]
 CAMERA_RE = re.compile(r"^[A-Za-z0-9_.:-]+$")
+
+INDEX_HTML = r"""
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Simple AI Vision</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f6f8fb;
+      --panel: #ffffff;
+      --text: #152033;
+      --muted: #637083;
+      --line: #d9e1ea;
+      --primary: #0b8ecf;
+      --danger: #b42318;
+      --ok: #087443;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #101820;
+        --panel: #172330;
+        --text: #eff6ff;
+        --muted: #a7b4c3;
+        --line: #2b3c4e;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+    h1 { margin: 0; font-size: 24px; }
+    h2 { margin: 0 0 14px; font-size: 17px; }
+    .sub { color: var(--muted); margin-top: 4px; }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      margin-bottom: 16px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+    label {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+      margin-bottom: 6px;
+    }
+    input, textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 10px;
+      background: transparent;
+      color: var(--text);
+      font: inherit;
+    }
+    textarea { min-height: 96px; resize: vertical; }
+    .full { grid-column: 1 / -1; }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      margin-top: 14px;
+    }
+    button {
+      border: 1px solid var(--primary);
+      border-radius: 6px;
+      background: var(--primary);
+      color: #fff;
+      padding: 10px 14px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    button.secondary {
+      background: transparent;
+      color: var(--primary);
+    }
+    button.danger {
+      border-color: var(--danger);
+      color: var(--danger);
+      background: transparent;
+    }
+    .camera-row {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .status {
+      min-height: 22px;
+      color: var(--muted);
+    }
+    .status.ok { color: var(--ok); }
+    .status.err { color: var(--danger); }
+    pre {
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 12px;
+      background: rgba(0, 0, 0, .05);
+      white-space: pre-wrap;
+    }
+    @media (max-width: 720px) {
+      main { padding: 16px; }
+      header { align-items: flex-start; flex-direction: column; }
+      .grid, .camera-row { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>Simple AI Vision</h1>
+        <div class="sub">Configure AI snapshot alerts and test cameras.</div>
+      </div>
+      <button class="secondary" id="reloadBtn" type="button">Reload</button>
+    </header>
+
+    <section class="panel">
+      <h2>Core Settings</h2>
+      <div class="grid">
+        <div>
+          <label for="go2rtc_url">go2rtc URL</label>
+          <input id="go2rtc_url" autocomplete="off">
+        </div>
+        <div>
+          <label for="ai_base_url">AI Base URL</label>
+          <input id="ai_base_url" autocomplete="off">
+        </div>
+        <div>
+          <label for="ai_model">AI Model</label>
+          <input id="ai_model" autocomplete="off">
+        </div>
+        <div>
+          <label for="telegram_chat_id">Telegram Chat ID</label>
+          <input id="telegram_chat_id" autocomplete="off">
+        </div>
+        <div>
+          <label for="ai_api_key">AI API Key</label>
+          <input id="ai_api_key" type="password" autocomplete="new-password">
+        </div>
+        <div>
+          <label for="telegram_bot_token">Telegram Bot Token</label>
+          <input id="telegram_bot_token" type="password" autocomplete="new-password">
+        </div>
+        <div class="full">
+          <label for="prompt">Prompt</label>
+          <textarea id="prompt"></textarea>
+        </div>
+        <div class="full">
+          <label for="keyword_match">Keyword Match, one per line</label>
+          <textarea id="keyword_match"></textarea>
+        </div>
+        <div>
+          <label for="ai_timeout">AI Timeout</label>
+          <input id="ai_timeout" type="number" min="1">
+        </div>
+        <div>
+          <label for="snapshot_timeout">Snapshot Timeout</label>
+          <input id="snapshot_timeout" type="number" min="1">
+        </div>
+        <div>
+          <label for="telegram_timeout">Telegram Timeout</label>
+          <input id="telegram_timeout" type="number" min="1">
+        </div>
+      </div>
+      <div class="actions">
+        <button id="saveBtn" type="button">Save Configuration</button>
+        <span id="configStatus" class="status"></span>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Cameras</h2>
+      <div id="cameraList"></div>
+      <div class="actions">
+        <button class="secondary" id="addCameraBtn" type="button">Add Camera</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Last Test Result</h2>
+      <pre id="result">{}</pre>
+    </section>
+  </main>
+
+  <script>
+    const fields = [
+      "go2rtc_url", "ai_api_key", "ai_base_url", "ai_model",
+      "telegram_bot_token", "telegram_chat_id", "prompt",
+      "ai_timeout", "snapshot_timeout", "telegram_timeout"
+    ];
+    let cameras = [];
+
+    function linesToList(value) {
+      return value.split("\n").map(v => v.trim()).filter(Boolean);
+    }
+
+    function setStatus(id, text, type) {
+      const el = document.getElementById(id);
+      el.textContent = text || "";
+      el.className = "status" + (type ? " " + type : "");
+    }
+
+    function renderCameras() {
+      const list = document.getElementById("cameraList");
+      list.innerHTML = "";
+      cameras.forEach((camera, index) => {
+        const row = document.createElement("div");
+        row.className = "camera-row";
+        const input = document.createElement("input");
+        input.value = camera;
+        input.placeholder = "garage";
+        input.addEventListener("input", () => cameras[index] = input.value);
+
+        const test = document.createElement("button");
+        test.className = "secondary";
+        test.type = "button";
+        test.textContent = "Test";
+        test.addEventListener("click", () => testCamera(input.value));
+
+        const remove = document.createElement("button");
+        remove.className = "danger";
+        remove.type = "button";
+        remove.textContent = "Remove";
+        remove.addEventListener("click", () => {
+          cameras.splice(index, 1);
+          renderCameras();
+        });
+
+        row.append(input, test, remove);
+        list.append(row);
+      });
+    }
+
+    async function loadConfig() {
+      setStatus("configStatus", "Loading...", "");
+      const response = await fetch("/api/config");
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        setStatus("configStatus", data.error || "Could not load config", "err");
+        return;
+      }
+      const config = data.config;
+      fields.forEach(id => document.getElementById(id).value = config[id] ?? "");
+      document.getElementById("keyword_match").value = (config.keyword_match || []).join("\n");
+      cameras = config.cameras || [];
+      renderCameras();
+      setStatus("configStatus", "Loaded", "ok");
+    }
+
+    async function saveConfig() {
+      const payload = {};
+      fields.forEach(id => payload[id] = document.getElementById(id).value);
+      payload.keyword_match = linesToList(document.getElementById("keyword_match").value);
+      payload.cameras = cameras.map(v => v.trim()).filter(Boolean);
+
+      setStatus("configStatus", "Saving...", "");
+      const response = await fetch("/api/config", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(payload)
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        setStatus("configStatus", data.error || "Save failed", "err");
+        return;
+      }
+      cameras = data.config.cameras || [];
+      renderCameras();
+      setStatus("configStatus", "Saved", "ok");
+    }
+
+    async function testCamera(camera) {
+      document.getElementById("result").textContent = "Running...";
+      const response = await fetch("/analyze", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({camera})
+      });
+      const data = await response.json();
+      document.getElementById("result").textContent = JSON.stringify(data, null, 2);
+    }
+
+    document.getElementById("reloadBtn").addEventListener("click", loadConfig);
+    document.getElementById("saveBtn").addEventListener("click", saveConfig);
+    document.getElementById("addCameraBtn").addEventListener("click", () => {
+      cameras.push("");
+      renderCameras();
+    });
+    loadConfig();
+  </script>
+</body>
+</html>
+"""
 
 
 logging.basicConfig(
@@ -36,8 +356,8 @@ def error_response(message: str, status_code: int = 400, **extra: Any) -> JSONRe
     return JSONResponse(payload, status_code=status_code)
 
 
-def load_options() -> dict[str, Any]:
-    defaults = {
+def default_options() -> dict[str, Any]:
+    return {
         "go2rtc_url": "",
         "ai_api_key": "",
         "ai_base_url": "https://api.openai.com/v1",
@@ -46,18 +366,67 @@ def load_options() -> dict[str, Any]:
         "telegram_chat_id": "",
         "prompt": DEFAULT_PROMPT,
         "keyword_match": DEFAULT_KEYWORDS,
+        "cameras": [],
         "ai_timeout": 30,
         "snapshot_timeout": 10,
         "telegram_timeout": 10,
     }
 
+
+def read_options() -> dict[str, Any]:
+    options = default_options()
+
     if os.path.exists(OPTIONS_PATH):
         with open(OPTIONS_PATH, "r", encoding="utf-8") as file:
             data = json.load(file)
-        defaults.update(data)
+        options.update(data)
 
-    validate_options(defaults)
-    return defaults
+    normalize_options(options)
+    return options
+
+
+def load_options() -> dict[str, Any]:
+    options = read_options()
+    validate_options(options)
+    return options
+
+
+def save_options(options: dict[str, Any]) -> dict[str, Any]:
+    current = read_options()
+    current.update(options)
+    normalize_options(current)
+    validate_options(current)
+
+    os.makedirs(os.path.dirname(OPTIONS_PATH), exist_ok=True)
+    tmp_path = f"{OPTIONS_PATH}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as file:
+        json.dump(current, file, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, OPTIONS_PATH)
+    return current
+
+
+def normalize_options(options: dict[str, Any]) -> None:
+    if not isinstance(options.get("keyword_match"), list):
+        options["keyword_match"] = []
+    options["keyword_match"] = [
+        str(item).strip()
+        for item in options.get("keyword_match", [])
+        if str(item).strip()
+    ]
+
+    if not isinstance(options.get("cameras"), list):
+        options["cameras"] = []
+    options["cameras"] = [
+        str(item).strip()
+        for item in options.get("cameras", [])
+        if str(item).strip()
+    ]
+
+    for key in ("ai_timeout", "snapshot_timeout", "telegram_timeout"):
+        try:
+            options[key] = int(options.get(key, 1))
+        except (TypeError, ValueError):
+            options[key] = 1
 
 
 def validate_options(options: dict[str, Any]) -> None:
@@ -75,6 +444,12 @@ def validate_options(options: dict[str, Any]) -> None:
 
     if not isinstance(options.get("keyword_match"), list):
         raise ValueError("keyword_match must be a list")
+
+    if not isinstance(options.get("cameras"), list):
+        raise ValueError("cameras must be a list")
+
+    for camera in options["cameras"]:
+        validate_camera(camera)
 
     for key in ("ai_timeout", "snapshot_timeout", "telegram_timeout"):
         try:
@@ -217,6 +592,42 @@ def cleanup_file(path: str | None) -> None:
 @app.get("/health")
 def health() -> dict[str, bool]:
     return {"success": True}
+
+
+@app.get("/", response_class=HTMLResponse)
+def index() -> str:
+    return INDEX_HTML
+
+
+@app.get("/api/config")
+def get_config() -> JSONResponse:
+    try:
+        return JSONResponse({"success": True, "config": read_options()})
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.error("Could not read config: %s", exc)
+        return error_response("could not read config", 500)
+
+
+@app.post("/api/config")
+async def update_config(request: Request) -> JSONResponse:
+    try:
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            return error_response("invalid JSON", 400)
+
+        if not isinstance(body, dict):
+            return error_response("invalid JSON body", 400)
+
+        config = save_options(body)
+        logger.info("Configuration saved")
+        return JSONResponse({"success": True, "config": config})
+    except ValueError as exc:
+        logger.error("%s", exc)
+        return error_response(str(exc), 400)
+    except OSError as exc:
+        logger.error("Could not save config: %s", exc)
+        return error_response("could not save config", 500)
 
 
 @app.post("/analyze")

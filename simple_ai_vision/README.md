@@ -9,7 +9,8 @@ Simple AI Vision là Home Assistant Add-on tối giản để phân tích snapsh
 - Gửi ảnh dạng `data:image/jpeg;base64,...` tới OpenAI-compatible `chat/completions`.
 - Match keyword case-insensitive, hỗ trợ regex.
 - Gửi Telegram bằng Bot API `sendPhoto`.
-- Không database, không MQTT, không video streaming, không UI dashboard.
+- Web UI đơn giản để chỉnh cấu hình và test nhiều camera.
+- Không database, không MQTT, không video streaming, không frontend SPA.
 
 ## Cài Đặt
 
@@ -25,6 +26,7 @@ https://github.com/minhhungtsbd/my_hass_addon_public
 5. Cài add-on **Simple AI Vision**.
 6. Mở tab **Configuration** và điền options.
 7. Bấm **Start**.
+8. Bấm **Open Web UI** để chỉnh cấu hình, thêm camera và test nhanh.
 
 ## Cấu Hình
 
@@ -44,6 +46,9 @@ keyword_match:
   - smoke
   - người
   - cháy
+cameras:
+  - garage
+  - front_gate
 ai_timeout: 30
 snapshot_timeout: 10
 telegram_timeout: 10
@@ -61,11 +66,25 @@ telegram_timeout: 10
 | `telegram_chat_id` | Telegram chat ID nhận cảnh báo |
 | `prompt` | Prompt gửi cho AI |
 | `keyword_match` | Danh sách keyword hoặc regex để quyết định gửi Telegram |
+| `cameras` | Danh sách camera go2rtc để thao tác nhanh trong Web UI |
 | `ai_timeout` | Timeout khi gọi AI API, đơn vị giây |
 | `snapshot_timeout` | Timeout khi lấy snapshot, đơn vị giây |
 | `telegram_timeout` | Timeout khi gửi Telegram, đơn vị giây |
 
 ## API
+
+Web UI:
+
+```http
+GET /
+```
+
+Config API dùng bởi Web UI:
+
+```http
+GET /api/config
+POST /api/config
+```
 
 Endpoint:
 
