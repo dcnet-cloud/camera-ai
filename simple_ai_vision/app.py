@@ -464,6 +464,20 @@ cháy"></textarea>
 
     <section class="panel tab-panel" id="livePanel">
       <h2>Live</h2>
+      <div class="grid">
+        <div>
+          <label for="liveSourceFilter">Live Source</label>
+          <select id="liveSourceFilter">
+            <option value="all">Both sources</option>
+            <option value="entity">Entities only</option>
+            <option value="go2rtc">go2rtc only</option>
+          </select>
+        </div>
+        <div>
+          <label for="liveLimit">Camera Limit</label>
+          <input id="liveLimit" type="number" min="1" placeholder="All">
+        </div>
+      </div>
       <div class="actions">
         <button class="secondary" id="refreshLiveBtn" type="button">Refresh Live</button>
       </div>
@@ -616,6 +630,30 @@ cháy"></textarea>
 
     function camerasWithPreview() {
       return cameras.map(normalizeCamera).filter(camera => camera.src || camera.entity_id);
+    }
+
+    function liveCameraItems() {
+      const source = document.getElementById("liveSourceFilter")?.value || "all";
+      const limitValue = document.getElementById("liveLimit")?.value.trim() || "";
+      let items = camerasWithPreview();
+
+      if (source === "entity") {
+        items = items.filter(camera => camera.entity_id)
+          .map(camera => ({...camera, live_source: "entity"}));
+      } else if (source === "go2rtc") {
+        items = items.filter(camera => camera.src)
+          .map(camera => ({...camera, live_source: "go2rtc"}));
+      } else {
+        items = items.map(camera => ({
+          ...camera,
+          live_source: camera.src ? "go2rtc" : "entity"
+        }));
+      }
+
+      if (/^[1-9][0-9]*$/.test(limitValue)) {
+        items = items.slice(0, Number(limitValue));
+      }
+      return items;
     }
 
     function validateTimeoutInputs() {
@@ -890,9 +928,9 @@ cháy"></textarea>
         liveRefreshTimer = null;
       }
       grid.innerHTML = "";
-      const items = camerasWithPreview();
+      const items = liveCameraItems();
       if (!items.length) {
-        grid.textContent = "No camera source configured.";
+        grid.textContent = "No camera matches the selected live filter.";
         return;
       }
 
@@ -905,11 +943,11 @@ cháy"></textarea>
         const name = document.createElement("div");
         name.textContent = cameraLabel(camera);
         const src = document.createElement("span");
-        src.textContent = camera.src || camera.entity_id;
+        src.textContent = camera.live_source === "go2rtc" ? camera.src : camera.entity_id;
         title.append(name, src);
 
         let media;
-        if (camera.src) {
+        if (camera.live_source === "go2rtc") {
           media = document.createElement("iframe");
           media.src = buildGo2rtcUrl(camera.src, "/stream.html", {mode: "mse"});
           media.allow = "autoplay; fullscreen; picture-in-picture";
@@ -1081,6 +1119,8 @@ cháy"></textarea>
     document.getElementById("loadStreamsBtn").addEventListener("click", loadGo2rtcStreams);
     document.getElementById("addStreamBtn").addEventListener("click", addSelectedStream);
     document.getElementById("refreshLiveBtn").addEventListener("click", renderLiveCameras);
+    document.getElementById("liveSourceFilter").addEventListener("change", renderLiveCameras);
+    document.getElementById("liveLimit").addEventListener("input", renderLiveCameras);
     document.getElementById("refreshEventsBtn").addEventListener("click", loadEvents);
     document.getElementById("addCameraBtn").addEventListener("click", () => {
       cameras.push({name: "", entity_id: "", src: ""});
