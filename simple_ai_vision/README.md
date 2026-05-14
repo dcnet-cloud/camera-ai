@@ -13,6 +13,7 @@ Simple AI Vision là Home Assistant Add-on tối giản để phân tích snapsh
 - Có nút test AI API riêng trước khi test camera.
 - Có nút lưu riêng trong phần Cameras.
 - Cấu hình chỉ nhập trong Web UI và được lưu tại `/data/simple_ai_vision_config.json`.
+- Hỗ trợ cả response JSON chuẩn và SSE streaming chunk từ một số OpenAI-compatible gateway.
 - Không database, không MQTT, không video streaming, không frontend SPA.
 
 ## Cài Đặt

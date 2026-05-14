@@ -717,6 +717,39 @@ def parse_ai_content(data: dict[str, Any]) -> str:
     return str(content).strip()
 
 
+def parse_ai_sse(text: str) -> str:
+    parts: list[str] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line.startswith("data:"):
+            continue
+
+        payload = line[5:].strip()
+        if not payload or payload == "[DONE]":
+            continue
+
+        try:
+            data = json.loads(payload)
+        except json.JSONDecodeError:
+            continue
+
+        for choice in data.get("choices", []):
+            if not isinstance(choice, dict):
+                continue
+            delta = choice.get("delta")
+            if isinstance(delta, dict) and delta.get("content"):
+                parts.append(str(delta["content"]))
+                continue
+            message = choice.get("message")
+            if isinstance(message, dict) and message.get("content"):
+                parts.append(str(message["content"]))
+
+    result = "".join(parts).strip()
+    if not result:
+        raise ValueError("AI API returned SSE response without text content")
+    return result
+
+
 def response_json(response: requests.Response, service: str) -> dict[str, Any]:
     try:
         data = response.json()
@@ -731,6 +764,14 @@ def response_json(response: requests.Response, service: str) -> dict[str, Any]:
         raise ValueError(f"{service} returned invalid JSON payload")
 
     return data
+
+
+def response_ai_content(response: requests.Response) -> str:
+    content_type = response.headers.get("content-type", "").lower()
+    text = response.text
+    if "text/event-stream" in content_type or text.lstrip().startswith("data:"):
+        return parse_ai_sse(text)
+    return parse_ai_content(response_json(response, "AI API"))
 
 
 def call_ai(data_url: str, options: dict[str, Any]) -> str:
@@ -748,6 +789,7 @@ def call_ai(data_url: str, options: dict[str, Any]) -> str:
             }
         ],
         "temperature": 0.2,
+        "stream": False,
     }
     headers = {
         "Authorization": f"Bearer {options['ai_api_key']}",
@@ -761,8 +803,7 @@ def call_ai(data_url: str, options: dict[str, Any]) -> str:
         timeout=options["ai_timeout"],
     )
     response.raise_for_status()
-    data = response_json(response, "AI API")
-    return parse_ai_content(data)
+    return response_ai_content(response)
 
 
 def call_ai_text(options: dict[str, Any]) -> str:
@@ -777,6 +818,7 @@ def call_ai_text(options: dict[str, Any]) -> str:
             }
         ],
         "temperature": 0,
+        "stream": False,
     }
     headers = {
         "Authorization": f"Bearer {options['ai_api_key']}",
@@ -790,7 +832,7 @@ def call_ai_text(options: dict[str, Any]) -> str:
         timeout=options["ai_timeout"],
     )
     response.raise_for_status()
-    return parse_ai_content(response_json(response, "AI API"))
+    return response_ai_content(response)
 
 
 def keyword_matched(analysis: str, keywords: list[Any]) -> bool:
