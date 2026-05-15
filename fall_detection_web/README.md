@@ -131,6 +131,15 @@ Các tab có hash URL riêng, ví dụ `#cameras`, `#live`, `#events`. Khi reloa
 
 Mỗi event `verified`, `test_ai`, `test_ai_camera`, `test_ai_upload` lưu thêm trường `ai_raw`, là nội dung text AI trả về sau khi parse response từ 9Router/OpenAI-compatible gateway.
 
+Prompt mặc định yêu cầu AI trả đúng 2 dòng:
+
+```text
+SAFE hoặc EMERGENCY
+Mô tả dưới 20 ký tự
+```
+
+Backend sẽ lưu dòng 1 vào cột `AI`, dòng 2 vào cột `AI Raw / Message`, đồng thời giữ response đầy đủ trong trường event `ai_response` để debug.
+
 ## Nhiều Camera
 
 Danh sách camera được lưu trong `data/config.json`:

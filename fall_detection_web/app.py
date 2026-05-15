@@ -21,6 +21,19 @@ EVENTS_PATH = DATA_DIR / "events.jsonl"
 SNAPSHOT_PATH = DATA_DIR / "latest.jpg"
 VERIFY_PATH = DATA_DIR / "verify.jpg"
 
+DEFAULT_VERIFY_PROMPT = """Bạn là hệ thống xác minh té ngã từ ảnh camera trong nhà.
+
+Nhiệm vụ:
+- Xác định người có bị té ngã, nằm bất thường dưới đất, gặp nguy hiểm, cần trợ giúp, hoặc cố đứng dậy thất bại không.
+- Nếu có nguy hiểm, dòng 1 chỉ trả lời: EMERGENCY
+- Nếu bình thường, dòng 1 chỉ trả lời: SAFE
+- Dòng 2 mô tả rất ngắn tình huống trong ảnh, tối đa 20 ký tự.
+
+Chỉ trả lời đúng 2 dòng, không giải thích thêm:
+SAFE hoặc EMERGENCY
+Mô tả dưới 20 ký tự
+"""
+
 DEFAULT_CONFIG: dict[str, Any] = {
     "rtsp_url": "",
     "go2rtc_url": "",
@@ -30,26 +43,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "ai_base_url": "https://9router.minhhungtsbd.me/v1",
     "ai_api_key": "",
     "vision_model": "gh/oswe-vscode-prime",
-    "verify_prompt": """Đây là ảnh camera giám sát người già trong nhà.
-
-Hãy xác định:
-- Người có bị té ngã không
-- Người có đang gặp nguy hiểm không
-- Người có đang nằm dưới đất bất thường không
-- Người có đang cần trợ giúp không
-- Người có đang cố đứng dậy nhưng thất bại không
-
-Nếu nguy hiểm trả lời:
-EMERGENCY
-
-Nếu bình thường trả lời:
-SAFE
-
-Chỉ trả lời đúng 1 từ:
-SAFE
-hoặc
-EMERGENCY
-""",
+    "verify_prompt": DEFAULT_VERIFY_PROMPT,
     "yolo_model": "yolov8s.pt",
     "confidence": 0.5,
     "verify_interval": 20,
@@ -1163,6 +1157,9 @@ def read_stored_config() -> dict[str, Any]:
     config = DEFAULT_CONFIG.copy()
     if isinstance(data, dict):
         config.update(data)
+    prompt = str(config.get("verify_prompt", ""))
+    if "Chỉ trả lời đúng 1 từ" in prompt and "Chỉ trả lời đúng 2 dòng" not in prompt:
+        config["verify_prompt"] = DEFAULT_VERIFY_PROMPT
     return config
 
 
@@ -1385,10 +1382,51 @@ def normalize_ai_result(content: str) -> str:
         return "EMERGENCY"
     if "SAFE" in upper:
         return "SAFE"
-    return content.strip()[:80] or "SAFE"
+    return "SAFE"
 
 
-def verify_scene(image_path: Path, config: dict[str, Any]) -> tuple[str, str]:
+def short_text(value: str, limit: int = 20) -> str:
+    value = " ".join(str(value).split())
+    return value[:limit]
+
+
+def parse_ai_verdict(content: str) -> tuple[str, str, str]:
+    lines = [line.strip() for line in str(content).splitlines() if line.strip()]
+    result = ""
+    description = ""
+
+    if lines:
+        first = lines[0].upper()
+        if first == "EMERGENCY" or first.startswith("EMERGENCY"):
+            result = "EMERGENCY"
+        elif first == "SAFE" or first.startswith("SAFE"):
+            result = "SAFE"
+
+    if not result:
+        result = normalize_ai_result(content)
+
+    for line in lines[1:]:
+        cleaned = line
+        for prefix in ("DESC:", "DESCRIPTION:", "MÔ TẢ:", "MO TA:", "-", "2."):
+            if cleaned.upper().startswith(prefix):
+                cleaned = cleaned[len(prefix):].strip()
+        if cleaned.upper() not in {"SAFE", "EMERGENCY"}:
+            description = cleaned
+            break
+
+    if not description:
+        for line in lines:
+            if line.upper() not in {"SAFE", "EMERGENCY"}:
+                description = line
+                break
+
+    if not description:
+        description = result
+
+    return result, short_text(description), str(content).strip()
+
+
+def verify_scene(image_path: Path, config: dict[str, Any]) -> tuple[str, str, str]:
     require_config(config, ["ai_api_key", "ai_base_url", "vision_model", "verify_prompt"])
     payload = {
         "model": config["vision_model"],
@@ -1412,9 +1450,9 @@ def verify_scene(image_path: Path, config: dict[str, Any]) -> tuple[str, str]:
     response = requests.post(chat_url(config), headers=headers, json=payload, timeout=120)
     response.raise_for_status()
     content = response_ai_content(response)
-    result = normalize_ai_result(content)
-    logger.info("[AI] result=%s raw=%r", result, content[:200])
-    return result, content
+    result, description, raw = parse_ai_verdict(content)
+    logger.info("[AI] result=%s description=%r raw=%r", result, description, raw[:200])
+    return result, description, raw
 
 
 def send_telegram(photo_path: Path, message: str, config: dict[str, Any]) -> None:
@@ -1530,10 +1568,18 @@ def monitor_loop(config: dict[str, Any]) -> None:
                         cv2.imwrite(str(verify_path), frame)
                         cv2.imwrite(str(SNAPSHOT_PATH), frame)
                         try:
-                            ai_result, raw = verify_scene(verify_path, config)
+                            ai_result, ai_description, raw = verify_scene(verify_path, config)
                             last_verify[index] = now
                             set_state(last_ai_result=ai_result, last_verify_at=now_iso(), last_error="")
-                            add_event("verified", camera=camera_name, confidence=best_confidence, ai_result=ai_result, ai_raw=raw, message=raw)
+                            add_event(
+                                "verified",
+                                camera=camera_name,
+                                confidence=best_confidence,
+                                ai_result=ai_result,
+                                ai_raw=ai_description,
+                                ai_response=raw,
+                                message=ai_description,
+                            )
                         except Exception as exc:
                             last_verify[index] = now
                             set_state(last_error=str(exc), last_verify_at=now_iso())
@@ -1672,9 +1718,9 @@ def api_test_ai() -> JSONResponse:
     if not SNAPSHOT_PATH.exists():
         return JSONResponse({"success": False, "error": "No snapshot. Capture first."}, status_code=400)
     try:
-        result, raw = verify_scene(SNAPSHOT_PATH, read_config())
-        add_event("test_ai", ai_result=result, ai_raw=raw, message=raw)
-        return JSONResponse({"success": True, "result": result, "raw": raw})
+        result, ai_description, raw = verify_scene(SNAPSHOT_PATH, read_config())
+        add_event("test_ai", ai_result=result, ai_raw=ai_description, ai_response=raw, message=ai_description)
+        return JSONResponse({"success": True, "result": result, "description": ai_description, "raw": raw})
     except Exception as exc:
         add_event("test_ai_error", error=str(exc))
         return JSONResponse({"success": False, "error": str(exc)}, status_code=500)
@@ -1685,10 +1731,10 @@ def api_test_ai_camera(index: int = 0) -> JSONResponse:
     try:
         config = read_config()
         path = capture_camera_snapshot(config, index)
-        result, raw = verify_scene(path, config)
+        result, ai_description, raw = verify_scene(path, config)
         camera = get_camera(config, index)
-        add_event("test_ai_camera", camera=camera["name"], ai_result=result, ai_raw=raw, message=raw)
-        return JSONResponse({"success": True, "camera": camera["name"], "result": result, "raw": raw})
+        add_event("test_ai_camera", camera=camera["name"], ai_result=result, ai_raw=ai_description, ai_response=raw, message=ai_description)
+        return JSONResponse({"success": True, "camera": camera["name"], "result": result, "description": ai_description, "raw": raw})
     except Exception as exc:
         add_event("test_ai_camera_error", error=str(exc))
         return JSONResponse({"success": False, "error": str(exc)}, status_code=500)
@@ -1703,9 +1749,9 @@ async def api_test_ai_upload(file: UploadFile = File(...)) -> JSONResponse:
         raise HTTPException(status_code=400, detail="Empty upload")
     path.write_bytes(content)
     try:
-        result, raw = verify_scene(path, read_config())
-        add_event("test_ai_upload", ai_result=result, ai_raw=raw, message=raw)
-        return JSONResponse({"success": True, "result": result, "raw": raw})
+        result, ai_description, raw = verify_scene(path, read_config())
+        add_event("test_ai_upload", ai_result=result, ai_raw=ai_description, ai_response=raw, message=ai_description)
+        return JSONResponse({"success": True, "result": result, "description": ai_description, "raw": raw})
     except Exception as exc:
         add_event("test_ai_upload_error", error=str(exc))
         return JSONResponse({"success": False, "error": str(exc)}, status_code=500)
