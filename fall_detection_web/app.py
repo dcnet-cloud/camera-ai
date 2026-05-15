@@ -1552,6 +1552,7 @@ def capture_rtsp_snapshot(rtsp_url: str, output_path: Path) -> Path:
     import cv2
 
     cap = cv2.VideoCapture(rtsp_url)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     try:
         ok, frame = cap.read()
         if not ok:
@@ -1577,6 +1578,7 @@ def mjpeg_frames(rtsp_url: str):
     import cv2
 
     cap = cv2.VideoCapture(rtsp_url)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     try:
       while True:
           ok, frame = cap.read()
@@ -1592,6 +1594,39 @@ def mjpeg_frames(rtsp_url: str):
         cap.release()
 
 
+def capture_latest_frames(index: int, camera: dict[str, Any], holder: dict[str, Any], lock: threading.Lock) -> None:
+    import cv2
+
+    camera_name = str(camera["name"])
+    rtsp_url = str(camera["rtsp_url"])
+    cap = cv2.VideoCapture(rtsp_url)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    last_reconnect_event = 0.0
+
+    try:
+        while not stop_event.is_set():
+            ok, frame = cap.read()
+            if not ok:
+                now = time.time()
+                if now - last_reconnect_event > 30:
+                    logger.warning("[RTSP] reconnect stream camera=%s", camera_name)
+                    set_state(last_error=f"RTSP read failed for {camera_name}, reconnecting", last_camera=camera_name)
+                    add_event("rtsp_reconnect", camera=camera_name, message="RTSP read failed")
+                    last_reconnect_event = now
+                cap.release()
+                time.sleep(0.5)
+                cap = cv2.VideoCapture(rtsp_url)
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                continue
+
+            with lock:
+                holder["frame"] = frame
+                holder["time"] = time.time()
+                holder["seq"] = int(holder.get("seq", 0)) + 1
+    finally:
+        cap.release()
+
+
 def monitor_loop(config: dict[str, Any]) -> None:
     import cv2
     from ultralytics import YOLO
@@ -1602,27 +1637,38 @@ def monitor_loop(config: dict[str, Any]) -> None:
     require_config(config, ["yolo_model"])
     logger.info("[MONITOR] loading YOLO model=%s", config["yolo_model"])
     model = YOLO(config["yolo_model"])
-    caps = [cv2.VideoCapture(camera["rtsp_url"]) for camera in cameras]
+    frame_holders: list[dict[str, Any]] = [{"frame": None, "time": 0.0, "seq": 0} for _ in cameras]
+    frame_locks = [threading.Lock() for _ in cameras]
+    capture_threads = [
+        threading.Thread(
+            target=capture_latest_frames,
+            args=(index, camera, frame_holders[index], frame_locks[index]),
+            daemon=True,
+        )
+        for index, camera in enumerate(cameras)
+    ]
     frame_counts = [0 for _ in cameras]
+    last_seen_seq = [0 for _ in cameras]
     last_verify = [0.0 for _ in cameras]
     last_alert = [0.0 for _ in cameras]
     total_frames = 0
     set_state(running=True, started_at=now_iso(), last_error="")
-    add_event("started", message=f"Monitor started for {len(cameras)} camera(s)")
+    for thread in capture_threads:
+        thread.start()
+    add_event("started", message=f"Monitor started for {len(cameras)} camera(s) with latest-frame capture")
 
     try:
         while not stop_event.is_set():
             for index, camera in enumerate(cameras):
                 camera_name = str(camera["name"])
-                ok, frame = caps[index].read()
-                if not ok:
-                    logger.warning("[RTSP] reconnect stream camera=%s", camera_name)
-                    set_state(last_error=f"RTSP read failed for {camera_name}, reconnecting", last_camera=camera_name)
-                    add_event("rtsp_reconnect", camera=camera_name, message="RTSP read failed")
-                    caps[index].release()
-                    caps[index] = cv2.VideoCapture(camera["rtsp_url"])
+                with frame_locks[index]:
+                    frame = frame_holders[index]["frame"]
+                    seq = int(frame_holders[index].get("seq", 0))
+
+                if frame is None or seq == last_seen_seq[index]:
                     continue
 
+                last_seen_seq[index] = seq
                 frame_counts[index] += 1
                 total_frames += 1
                 set_state(frames=total_frames, last_camera=camera_name)
@@ -1690,8 +1736,9 @@ def monitor_loop(config: dict[str, Any]) -> None:
         set_state(last_error=str(exc))
         add_event("monitor_error", error=str(exc))
     finally:
-        for cap in caps:
-            cap.release()
+        stop_event.set()
+        for thread in capture_threads:
+            thread.join(timeout=2)
         set_state(running=False)
         add_event("stopped", message="Monitor stopped")
 

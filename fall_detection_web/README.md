@@ -226,3 +226,16 @@ RTSP from go2rtc
 -> AI fall verification
 -> Telegram
 ```
+
+## Realtime Notes
+
+Monitor dùng một capture thread cho mỗi camera để luôn giữ frame mới nhất và bỏ frame cũ. Thread phân tích chỉ lấy latest frame, vì vậy khi AI/Yolo xử lý chậm, app không đọc backlog RTSP cũ nhiều phút.
+
+Các log như:
+
+```text
+[h264] error while decoding
+[rtsp] RTP: bad cseq
+```
+
+đến từ FFmpeg/OpenCV khi RTSP mất gói hoặc lệch thứ tự packet. App sẽ reconnect/tiếp tục đọc frame mới. Nếu lỗi xuất hiện dày đặc, nên ưu tiên RTSP TCP hoặc stream phụ ổn định hơn từ go2rtc.
