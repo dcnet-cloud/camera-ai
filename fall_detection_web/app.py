@@ -38,8 +38,17 @@ async def lifespan(app: FastAPI):
     config.migrate_config_json()   # one-time: config.json → DB
     current_config = config.read_config()
     
-    # Init auth secret
-    jwt_secret = secrets.token_urlsafe(32)
+    # Init auth secret from config or env
+    jwt_secret = current_config.get("jwt_secret")
+    if not jwt_secret:
+        # Fallback: check persistent file
+        secret_file = DATA_DIR / ".secret_key"
+        if secret_file.exists():
+            jwt_secret = secret_file.read_text(encoding="utf-8").strip()
+        else:
+            jwt_secret = secrets.token_urlsafe(32)
+            secret_file.write_text(jwt_secret, encoding="utf-8")
+    
     auth.configure_secret(jwt_secret)
     
     # Create default admin if no users

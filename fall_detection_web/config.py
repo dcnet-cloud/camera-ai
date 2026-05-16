@@ -59,6 +59,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "frame_skip": 2,
     "loop_sleep": 0.3,
     "webhook_token": "",
+    "jwt_secret": "",
 }
 
 # Keys that env vars can override (env key → config key)
@@ -78,6 +79,7 @@ ENV_CONFIG_KEYS: dict[str, str] = {
     "FRAME_SKIP": "frame_skip",
     "LOOP_SLEEP": "loop_sleep",
     "WEBHOOK_TOKEN": "webhook_token",
+    "JWT_SECRET": "jwt_secret",
 }
 
 # Numeric keys that need type coercion when read from DB (stored as TEXT)
