@@ -114,6 +114,32 @@ async def index_page(request: Request, _: str = Depends(auth.require_auth)):
 # API Routes
 # ──────────────────────────────────────────────
 
+@app.post("/api/user/update")
+async def update_user_credentials(
+    response: Response,
+    payload: dict[str, str] = Body(...),
+    username: str = Depends(auth.require_auth)
+):
+    new_user = payload.get("username", "").strip()
+    new_pass = payload.get("password", "")
+    if not new_user or not new_pass:
+        raise HTTPException(status_code=400, detail="Username and password are required")
+    
+    try:
+        db.update_user(username, new_user, auth.hash_password(new_pass))
+        # Issuing new token since username changed
+        new_token = auth.create_token(new_user)
+        response.set_cookie(
+            key="session",
+            value=new_token,
+            httponly=True,
+            samesite="lax",
+            max_age=auth._SESSION_HOURS * 3600
+        )
+        return {"success": True, "message": "Credentials updated"}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Failed to update credentials. Username might already exist.")
+
 @app.get("/api/config")
 async def get_config(_: str = Depends(auth.require_auth)):
     return {"success": True, "config": config.read_config()}

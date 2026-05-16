@@ -302,9 +302,9 @@ def create_user(username: str, password_hash: str) -> None:
         )
 
 
-def update_password(username: str, password_hash: str) -> None:
+def update_user(old_username: str, new_username: str, password_hash: str) -> None:
     with get_conn() as conn:
-        conn.execute("UPDATE users SET password_hash=? WHERE username=?", (password_hash, username))
+        conn.execute("UPDATE users SET username=?, password_hash=? WHERE username=?", (new_username, password_hash, old_username))
 
 
 def list_users() -> list[dict[str, Any]]:

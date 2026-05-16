@@ -533,6 +533,23 @@
           <span id="configStatus"></span>
         </div>
       </div>
+      <div class="panel" style="margin-top: 18px;">
+        <h2>Admin Credentials</h2>
+        <div class="grid">
+          <div>
+            <label for="admin_username">New Username</label>
+            <input id="admin_username" autocomplete="off" placeholder="admin">
+          </div>
+          <div>
+            <label for="admin_password">New Password</label>
+            <input id="admin_password" type="password" autocomplete="new-password" placeholder="••••••••">
+          </div>
+        </div>
+        <div class="actions" style="margin-top:14px">
+          <button id="saveCredentialsBtn" class="primary" type="button">Update Credentials</button>
+          <span id="credStatus"></span>
+        </div>
+      </div>
     </section>
 
     <section id="eventsPanel" class="tab-panel hidden">
@@ -1002,6 +1019,26 @@
       }
     });
     document.getElementById("reloadConfigBtn").addEventListener("click", () => loadConfig().catch(err => setStatus("configStatus", err.message, "err")));
+    
+    document.getElementById("saveCredentialsBtn").addEventListener("click", async () => {
+      const username = document.getElementById("admin_username").value.trim();
+      const password = document.getElementById("admin_password").value;
+      if (!username || !password) {
+        setStatus("credStatus", "Username and password required", "warn");
+        return;
+      }
+      try {
+        const data = await api("/api/user/update", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({username, password})
+        });
+        setStatus("credStatus", data.message || "Credentials updated", "ok");
+        document.getElementById("admin_password").value = "";
+      } catch (err) {
+        setStatus("credStatus", err.message, "err");
+      }
+    });
     document.getElementById("startBtn").addEventListener("click", async () => {
       try {
         await api("/api/start", {method: "POST"});
