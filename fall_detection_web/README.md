@@ -252,3 +252,30 @@ Các log như:
 ```
 
 đến từ FFmpeg/OpenCV khi RTSP mất gói hoặc lệch thứ tự packet. App sẽ reconnect/tiếp tục đọc frame mới. Nếu lỗi xuất hiện dày đặc, nên ưu tiên RTSP TCP hoặc stream phụ ổn định hơn từ go2rtc.
+
+## Frigate/OpenVINO Trigger Mode
+
+Chon `Detection Mode = Frigate/OpenVINO trigger` neu Frigate da detect `person`.
+Mode nay khong load YOLO/PyTorch va khong chay object detection trong app.
+
+Frigate hoac Home Assistant goi webhook:
+
+```http
+POST /api/frigate-trigger
+Content-Type: application/json
+```
+
+Payload toi thieu:
+
+```json
+{
+  "camera": "bep",
+  "label": "person",
+  "score": 0.82
+}
+```
+
+Payload Frigate event co `after.camera`, `after.label`, `after.top_score` cung duoc ho tro.
+Ten camera se duoc map voi `name` hoac `go2rtc_src` trong danh sach Cameras. Khi nhan trigger hop le, app chup snapshot RTSP cua camera do, goi AI verify, gui Telegram neu AI tra ve `EMERGENCY`.
+
+Khi save Settings hoac Cameras trong UI luc monitor dang chay, app se tu restart monitor worker voi cau hinh moi. Khong can restart uvicorn.

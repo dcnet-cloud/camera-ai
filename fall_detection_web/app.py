@@ -90,6 +90,10 @@ app = FastAPI(title="Fall Detection Web")
 state_lock = threading.Lock()
 stop_event = threading.Event()
 worker_thread: threading.Thread | None = None
+monitor_lock = threading.Lock()
+frigate_lock = threading.Lock()
+frigate_last_verify: dict[str, float] = {}
+frigate_last_alert: dict[str, float] = {}
 status: dict[str, Any] = {
     "running": False,
     "started_at": "",
@@ -100,6 +104,7 @@ status: dict[str, Any] = {
     "last_verify_at": "",
     "last_alert_at": "",
     "frames": 0,
+    "mode": "",
 }
 
 
@@ -550,6 +555,7 @@ INDEX_HTML = r"""
             <label for="detection_mode">Detection Mode</label>
             <select id="detection_mode">
               <option value="yolo">YOLO prefilter</option>
+              <option value="frigate">Frigate/OpenVINO trigger</option>
               <option value="interval">AI interval only</option>
             </select>
           </div>
@@ -1043,7 +1049,7 @@ INDEX_HTML = r"""
           body: JSON.stringify(collectConfig())
         });
         renderConfig(data.config);
-        setStatus("configStatus", "Saved", "ok");
+        setStatus("configStatus", data.message || "Saved", "ok");
       } catch (err) {
         setStatus("configStatus", err.message, "err");
       }
@@ -1093,7 +1099,7 @@ INDEX_HTML = r"""
           body: JSON.stringify(collectConfig())
         });
         renderConfig(data.config);
-        setStatus("cameraStatus", "Saved", "ok");
+        setStatus("cameraStatus", data.message || "Saved", "ok");
       } catch (err) {
         setStatus("cameraStatus", err.message, "err");
       }
@@ -1269,8 +1275,8 @@ def write_config(config: dict[str, Any]) -> dict[str, Any]:
         clean[key] = config.get(key, clean[key])
     clean["cameras"] = normalize_cameras(clean)
     clean["detection_mode"] = str(clean.get("detection_mode", "yolo")).strip().lower()
-    if clean["detection_mode"] not in {"yolo", "interval"}:
-        raise ValueError("detection_mode must be yolo or interval")
+    if clean["detection_mode"] not in {"yolo", "frigate", "interval"}:
+        raise ValueError("detection_mode must be yolo, frigate, or interval")
     clean["confidence"] = clamp_float(clean["confidence"], 0.01, 1.0, "confidence")
     clean["verify_interval"] = positive_int(clean["verify_interval"], "verify_interval")
     clean["alert_cooldown"] = positive_int(clean["alert_cooldown"], "alert_cooldown")
@@ -1567,6 +1573,65 @@ def send_telegram(photo_path: Path, message: str, config: dict[str, Any]) -> Non
     response.raise_for_status()
 
 
+def process_camera_verification(
+    config: dict[str, Any],
+    index: int,
+    image_path: Path,
+    confidence: float,
+    last_alert: dict[int | str, float],
+    alert_key: int | str,
+    event_source: str = "verified",
+) -> dict[str, Any]:
+    camera = get_camera(config, index)
+    camera_name = str(camera["name"])
+    ai_result = "SAFE"
+    ai_description = ""
+    raw = ""
+    try:
+        ai_result, ai_description, raw = verify_scene(image_path, config)
+        set_state(last_ai_result=ai_result, last_verify_at=now_iso(), last_error="", last_camera=camera_name)
+        add_event(
+            event_source,
+            image_path=image_path,
+            camera=camera_name,
+            confidence=confidence,
+            ai_result=ai_result,
+            ai_raw=ai_description,
+            ai_response=raw,
+            message=ai_description,
+        )
+    except Exception as exc:
+        set_state(last_error=str(exc), last_verify_at=now_iso(), last_camera=camera_name)
+        add_event("ai_error", image_path=image_path, camera=camera_name, confidence=confidence, error=str(exc))
+        return {"success": False, "camera": camera_name, "error": str(exc), "result": ai_result}
+
+    if ai_result == "EMERGENCY":
+        now = time.time()
+        if now - last_alert.get(alert_key, 0.0) > float(config["alert_cooldown"]):
+            try:
+                send_telegram(
+                    image_path,
+                    f"AI phat hien nguoi co the bi te nga hoac gap nguy hiem!\nCamera: {camera_name}",
+                    config,
+                )
+                last_alert[alert_key] = now
+                set_state(last_alert_at=now_iso())
+                add_event("telegram_sent", image_path=image_path, camera=camera_name, confidence=confidence, ai_result=ai_result)
+            except Exception as exc:
+                set_state(last_error=str(exc), last_camera=camera_name)
+                add_event("telegram_error", image_path=image_path, camera=camera_name, confidence=confidence, error=str(exc))
+        else:
+            add_event("cooldown", image_path=image_path, camera=camera_name, confidence=confidence, ai_result=ai_result)
+
+    return {
+        "success": True,
+        "camera": camera_name,
+        "result": ai_result,
+        "description": ai_description,
+        "raw": raw,
+    }
+
+
 def capture_rtsp_snapshot(rtsp_url: str, output_path: Path) -> Path:
     import cv2
 
@@ -1653,6 +1718,18 @@ def monitor_loop(config: dict[str, Any]) -> None:
     if not cameras:
         raise ValueError("No enabled cameras")
     detection_mode = str(config.get("detection_mode", "yolo")).lower()
+    if detection_mode == "frigate":
+        logger.info("[MONITOR] Frigate/OpenVINO trigger mode ready")
+        set_state(running=True, started_at=now_iso(), last_error="", mode=detection_mode)
+        add_event("started", message="Frigate/OpenVINO trigger mode ready")
+        try:
+            while not stop_event.is_set():
+                time.sleep(0.5)
+        finally:
+            set_state(running=False)
+            add_event("stopped", message="Monitor stopped")
+        return
+
     model = None
     if detection_mode == "yolo":
         from ultralytics import YOLO
@@ -1676,9 +1753,9 @@ def monitor_loop(config: dict[str, Any]) -> None:
     frame_counts = [0 for _ in cameras]
     last_seen_seq = [0 for _ in cameras]
     last_verify = [0.0 for _ in cameras]
-    last_alert = [0.0 for _ in cameras]
+    last_alert: dict[int | str, float] = {index: 0.0 for index in range(len(cameras))}
     total_frames = 0
-    set_state(running=True, started_at=now_iso(), last_error="")
+    set_state(running=True, started_at=now_iso(), last_error="", mode=detection_mode)
     for thread in capture_threads:
         thread.start()
     add_event("started", message=f"Monitor started for {len(cameras)} camera(s), mode={detection_mode}")
@@ -1779,6 +1856,72 @@ def monitor_loop(config: dict[str, Any]) -> None:
         add_event("stopped", message="Monitor stopped")
 
 
+def start_monitor(config: dict[str, Any]) -> str:
+    global worker_thread
+    with monitor_lock:
+        if worker_thread and worker_thread.is_alive():
+            return "already running"
+        stop_event.clear()
+        worker_thread = threading.Thread(target=monitor_loop, args=(config,), daemon=True)
+        worker_thread.start()
+        return "started"
+
+
+def stop_monitor(wait: bool = False) -> None:
+    stop_event.set()
+    thread = worker_thread
+    if wait and thread and thread.is_alive():
+        thread.join(timeout=5)
+
+
+def restart_monitor(config: dict[str, Any]) -> None:
+    with monitor_lock:
+        thread = worker_thread
+        if not thread or not thread.is_alive():
+            return
+        stop_event.set()
+        thread.join(timeout=5)
+        stop_event.clear()
+        new_thread = threading.Thread(target=monitor_loop, args=(config,), daemon=True)
+        globals()["worker_thread"] = new_thread
+        new_thread.start()
+        add_event("config_applied", message="Monitor restarted with new settings")
+
+
+def find_camera_index(config: dict[str, Any], camera_name: str, fallback_index: int | None = None) -> int:
+    cameras = normalize_cameras(config)
+    if fallback_index is not None and 0 <= fallback_index < len(cameras):
+        return fallback_index
+    needle = camera_name.strip().lower()
+    for index, camera in enumerate(cameras):
+        names = {
+            str(camera.get("name", "")).strip().lower(),
+            str(camera.get("go2rtc_src", "")).strip().lower(),
+        }
+        if needle and needle in names:
+            return index
+    if len(cameras) == 1:
+        return 0
+    raise ValueError("Cannot map Frigate camera to configured camera")
+
+
+def parse_frigate_payload(payload: dict[str, Any], config: dict[str, Any]) -> tuple[int, float, str]:
+    event = payload.get("after") if isinstance(payload.get("after"), dict) else payload
+    label = str(event.get("label", payload.get("label", ""))).strip().lower()
+    if label and label != "person":
+        raise ValueError(f"Ignored non-person Frigate event: {label}")
+    camera_name = str(event.get("camera", payload.get("camera", ""))).strip()
+    raw_index = payload.get("index", event.get("index"))
+    fallback_index = int(raw_index) if isinstance(raw_index, int) or str(raw_index).isdigit() else None
+    score = event.get("top_score", event.get("score", payload.get("score", payload.get("confidence", 0.0))))
+    try:
+        confidence = float(score)
+    except (TypeError, ValueError):
+        confidence = 0.0
+    index = find_camera_index(config, camera_name, fallback_index)
+    return index, confidence, camera_name
+
+
 @app.get("/", response_class=HTMLResponse)
 def index() -> HTMLResponse:
     return HTMLResponse(INDEX_HTML)
@@ -1796,8 +1939,12 @@ async def api_save_config(request: Request) -> JSONResponse:
         body = await request.json()
         if not isinstance(body, dict):
             raise ValueError("Invalid config payload")
+        was_running = bool(read_state().get("running"))
         config = write_config(body)
-        return JSONResponse({"success": True, "config": config})
+        if was_running:
+            restart_monitor(config)
+        message = "saved and applied" if was_running else "saved"
+        return JSONResponse({"success": True, "config": config, "message": message})
     except (json.JSONDecodeError, ValueError) as exc:
         return JSONResponse({"success": False, "error": str(exc)}, status_code=400)
 
@@ -1809,25 +1956,21 @@ def api_status() -> JSONResponse:
 
 @app.post("/api/start")
 def api_start() -> JSONResponse:
-    global worker_thread
-    if worker_thread and worker_thread.is_alive():
-        return JSONResponse({"success": True, "message": "already running", "status": read_state()})
     try:
         config = read_config()
         if not [camera for camera in normalize_cameras(config) if camera.get("enabled") and camera.get("rtsp_url")]:
             raise ValueError("No enabled cameras")
-        require_config(config, ["yolo_model"])
+        if str(config.get("detection_mode", "yolo")).lower() == "yolo":
+            require_config(config, ["yolo_model"])
     except ValueError as exc:
         return JSONResponse({"success": False, "error": str(exc)}, status_code=400)
-    stop_event.clear()
-    worker_thread = threading.Thread(target=monitor_loop, args=(config,), daemon=True)
-    worker_thread.start()
-    return JSONResponse({"success": True, "message": "started"})
+    message = start_monitor(config)
+    return JSONResponse({"success": True, "message": message})
 
 
 @app.post("/api/stop")
 def api_stop() -> JSONResponse:
-    stop_event.set()
+    stop_monitor()
     return JSONResponse({"success": True, "message": "stopping"})
 
 
@@ -1910,6 +2053,40 @@ def api_test_ai_camera(index: int = 0) -> JSONResponse:
         return JSONResponse({"success": True, "camera": camera["name"], "result": result, "description": ai_description, "raw": raw})
     except Exception as exc:
         add_event("test_ai_camera_error", error=str(exc))
+        return JSONResponse({"success": False, "error": str(exc)}, status_code=500)
+
+
+@app.post("/api/frigate-trigger")
+async def api_frigate_trigger(request: Request) -> JSONResponse:
+    try:
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise ValueError("Invalid Frigate payload")
+        config = read_config()
+        if str(config.get("detection_mode", "yolo")).lower() != "frigate":
+            raise ValueError("Detection Mode must be frigate to accept Frigate triggers")
+        index, confidence, source_camera = parse_frigate_payload(payload, config)
+        camera = get_camera(config, index)
+        camera_name = str(camera["name"])
+        now = time.time()
+        with frigate_lock:
+            last_seen = frigate_last_verify.get(camera_name, 0.0)
+            if now - last_seen <= float(config["verify_interval"]):
+                add_event("frigate_cooldown", camera=camera_name, confidence=confidence, message="Verify interval cooldown")
+                return JSONResponse({"success": True, "message": "verify interval cooldown", "camera": camera_name})
+            frigate_last_verify[camera_name] = now
+
+        logger.info("[FRIGATE] person trigger camera=%s confidence=%.2f", source_camera or camera_name, confidence)
+        set_state(last_person_confidence=confidence, last_error="", last_camera=camera_name, mode="frigate")
+        path = capture_camera_snapshot(config, index)
+        shutil.copyfile(path, SNAPSHOT_PATH)
+        result = process_camera_verification(config, index, path, confidence, frigate_last_alert, camera_name, "frigate_verified")
+        return JSONResponse(result, status_code=200 if result.get("success") else 500)
+    except ValueError as exc:
+        add_event("frigate_trigger_ignored", error=str(exc))
+        return JSONResponse({"success": False, "error": str(exc)}, status_code=400)
+    except Exception as exc:
+        add_event("frigate_trigger_error", error=str(exc))
         return JSONResponse({"success": False, "error": str(exc)}, status_code=500)
 
 
