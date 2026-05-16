@@ -105,7 +105,9 @@ Trong tab **Settings**:
 | `Vision Model` | Model vision, ví dụ `gh/oswe-vscode-prime` |
 | `AI API Key` | API key, nên lấy từ `.env` |
 | `AI Verify Prompt` | Prompt xác minh té ngã gửi tới AI. Có thể chỉnh trực tiếp trong UI |
-| `YOLO Model` | Model YOLO, ví dụ `yolov8s.pt` |
+| `Detection Mode` | `YOLO prefilter` dùng YOLO để chỉ gọi AI khi thấy người; `AI interval only` không load YOLO để giảm RAM |
+| `YOLO Model` | Model YOLO, khuyến nghị `yolov8n.pt` để giảm RAM/CPU |
+| `YOLO Image Size` | Kích thước inference YOLO, ví dụ `416`; giảm xuống `320` sẽ nhẹ hơn nhưng kém chính xác hơn |
 | `Telegram Bot Token` | Bot token, nên lấy từ `.env` |
 | `Telegram Chat ID` | Chat nhận cảnh báo, có thể lấy từ `.env` |
 | `YOLO Confidence` | Ngưỡng phát hiện person |
@@ -230,6 +232,17 @@ RTSP from go2rtc
 ## Realtime Notes
 
 Monitor dùng một capture thread cho mỗi camera để luôn giữ frame mới nhất và bỏ frame cũ. Thread phân tích chỉ lấy latest frame, vì vậy khi AI/Yolo xử lý chậm, app không đọc backlog RTSP cũ nhiều phút.
+
+## Resource Tuning
+
+RAM cao chủ yếu đến từ `ultralytics/torch` và model YOLO. Trong `htop`, một process nhiều thread có thể hiện nhiều dòng giống nhau; RSS bị lặp theo thread chứ không phải mỗi dòng là một process riêng. Tuy nhiên nếu thấy process Python gần 1GB RAM thì nguyên nhân chính vẫn là PyTorch/YOLO.
+
+Các cách giảm RAM/CPU:
+
+- Dùng `yolov8n.pt` thay vì `yolov8s.pt`.
+- Giảm `YOLO Image Size` xuống `416` hoặc `320`.
+- Tăng `Frame Skip`.
+- Chọn `Detection Mode = AI interval only` để không load YOLO/PyTorch. Chế độ này giảm RAM mạnh nhất, nhưng sẽ gọi AI theo `Verify Interval` thay vì dùng YOLO làm bộ lọc người.
 
 Các log như:
 

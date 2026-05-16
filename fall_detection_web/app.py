@@ -47,7 +47,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "ai_api_key": "",
     "vision_model": "gh/oswe-vscode-prime",
     "verify_prompt": DEFAULT_VERIFY_PROMPT,
-    "yolo_model": "yolov8s.pt",
+    "detection_mode": "yolo",
+    "yolo_model": "yolov8n.pt",
+    "yolo_imgsz": 416,
     "confidence": 0.5,
     "verify_interval": 20,
     "alert_cooldown": 300,
@@ -63,7 +65,9 @@ ENV_CONFIG_KEYS = {
     "AI_BASE_URL": "ai_base_url",
     "AI_API_KEY": "ai_api_key",
     "VISION_MODEL": "vision_model",
+    "DETECTION_MODE": "detection_mode",
     "YOLO_MODEL": "yolo_model",
+    "YOLO_IMGSZ": "yolo_imgsz",
     "CONFIDENCE": "confidence",
     "VERIFY_INTERVAL": "verify_interval",
     "ALERT_COOLDOWN": "alert_cooldown",
@@ -543,8 +547,19 @@ INDEX_HTML = r"""
             <input id="ai_api_key" type="password" autocomplete="new-password">
           </div>
           <div>
+            <label for="detection_mode">Detection Mode</label>
+            <select id="detection_mode">
+              <option value="yolo">YOLO prefilter</option>
+              <option value="interval">AI interval only</option>
+            </select>
+          </div>
+          <div>
             <label for="yolo_model">YOLO Model</label>
-            <input id="yolo_model" autocomplete="off" placeholder="yolov8s.pt">
+            <input id="yolo_model" autocomplete="off" placeholder="yolov8n.pt">
+          </div>
+          <div>
+            <label for="yolo_imgsz">YOLO Image Size</label>
+            <input id="yolo_imgsz" type="number" min="160" step="32" placeholder="416">
           </div>
           <div>
             <label for="telegram_bot_token">Telegram Bot Token</label>
@@ -637,9 +652,9 @@ INDEX_HTML = r"""
     let currentViewerMode = "";
     let latestEvents = [];
     let latestStatus = {};
-    const numericIds = ["confidence", "verify_interval", "alert_cooldown", "frame_skip", "loop_sleep"];
+    const numericIds = ["confidence", "verify_interval", "alert_cooldown", "frame_skip", "loop_sleep", "yolo_imgsz"];
     const configIds = [
-      "rtsp_url", "go2rtc_url", "ai_base_url", "ai_api_key", "vision_model", "verify_prompt", "yolo_model",
+      "rtsp_url", "go2rtc_url", "ai_base_url", "ai_api_key", "vision_model", "verify_prompt", "detection_mode", "yolo_model",
       "telegram_bot_token", "telegram_chat_id", ...numericIds
     ];
 
@@ -1172,7 +1187,7 @@ def parse_env_file(path: Path) -> dict[str, str]:
 
 
 def coerce_config_value(key: str, value: str) -> Any:
-    if key in {"verify_interval", "alert_cooldown", "frame_skip"}:
+    if key in {"verify_interval", "alert_cooldown", "frame_skip", "yolo_imgsz"}:
         return positive_int(value, key)
     if key == "confidence":
         return clamp_float(value, 0.01, 1.0, key)
@@ -1253,10 +1268,14 @@ def write_config(config: dict[str, Any]) -> dict[str, Any]:
     for key in clean:
         clean[key] = config.get(key, clean[key])
     clean["cameras"] = normalize_cameras(clean)
+    clean["detection_mode"] = str(clean.get("detection_mode", "yolo")).strip().lower()
+    if clean["detection_mode"] not in {"yolo", "interval"}:
+        raise ValueError("detection_mode must be yolo or interval")
     clean["confidence"] = clamp_float(clean["confidence"], 0.01, 1.0, "confidence")
     clean["verify_interval"] = positive_int(clean["verify_interval"], "verify_interval")
     clean["alert_cooldown"] = positive_int(clean["alert_cooldown"], "alert_cooldown")
     clean["frame_skip"] = positive_int(clean["frame_skip"], "frame_skip")
+    clean["yolo_imgsz"] = positive_int(clean["yolo_imgsz"], "yolo_imgsz")
     clean["loop_sleep"] = max(0.0, float(clean["loop_sleep"]))
     env_values, _ = env_config_values()
     for key in SECRET_CONFIG_KEYS:
@@ -1629,14 +1648,21 @@ def capture_latest_frames(index: int, camera: dict[str, Any], holder: dict[str, 
 
 def monitor_loop(config: dict[str, Any]) -> None:
     import cv2
-    from ultralytics import YOLO
 
     cameras = [camera for camera in normalize_cameras(config) if camera.get("enabled") and camera.get("rtsp_url")]
     if not cameras:
         raise ValueError("No enabled cameras")
-    require_config(config, ["yolo_model"])
-    logger.info("[MONITOR] loading YOLO model=%s", config["yolo_model"])
-    model = YOLO(config["yolo_model"])
+    detection_mode = str(config.get("detection_mode", "yolo")).lower()
+    model = None
+    if detection_mode == "yolo":
+        from ultralytics import YOLO
+
+        if str(config.get("detection_mode", "yolo")).lower() == "yolo":
+            require_config(config, ["yolo_model"])
+        logger.info("[MONITOR] loading YOLO model=%s imgsz=%s", config["yolo_model"], config["yolo_imgsz"])
+        model = YOLO(config["yolo_model"])
+    else:
+        logger.info("[MONITOR] running without YOLO; AI interval mode enabled")
     frame_holders: list[dict[str, Any]] = [{"frame": None, "time": 0.0, "seq": 0} for _ in cameras]
     frame_locks = [threading.Lock() for _ in cameras]
     capture_threads = [
@@ -1655,7 +1681,7 @@ def monitor_loop(config: dict[str, Any]) -> None:
     set_state(running=True, started_at=now_iso(), last_error="")
     for thread in capture_threads:
         thread.start()
-    add_event("started", message=f"Monitor started for {len(cameras)} camera(s) with latest-frame capture")
+    add_event("started", message=f"Monitor started for {len(cameras)} camera(s), mode={detection_mode}")
 
     try:
         while not stop_event.is_set():
@@ -1675,19 +1701,29 @@ def monitor_loop(config: dict[str, Any]) -> None:
                 if frame_counts[index] % int(config["frame_skip"]) != 0:
                     continue
 
-                results = model(frame, verbose=False, conf=float(config["confidence"]))
-                person_detected = False
+                now = time.time()
+                person_detected = detection_mode == "interval" and (now - last_verify[index] > float(config["verify_interval"]))
                 best_confidence = 0.0
-                for result in results:
-                    for box in result.boxes:
-                        if int(box.cls[0]) == 0:
-                            person_detected = True
-                            best_confidence = max(best_confidence, float(box.conf[0]))
+                if detection_mode == "yolo" and model is not None:
+                    results = model.predict(
+                        frame,
+                        verbose=False,
+                        conf=float(config["confidence"]),
+                        imgsz=int(config["yolo_imgsz"]),
+                        classes=[0],
+                    )
+                    for result in results:
+                        for box in result.boxes:
+                            if int(box.cls[0]) == 0:
+                                person_detected = True
+                                best_confidence = max(best_confidence, float(box.conf[0]))
 
                 if person_detected:
                     set_state(last_person_confidence=best_confidence, last_error="", last_camera=camera_name)
-                    logger.info("[PERSON] camera=%s confidence=%.2f", camera_name, best_confidence)
-                    now = time.time()
+                    if detection_mode == "yolo":
+                        logger.info("[PERSON] camera=%s confidence=%.2f", camera_name, best_confidence)
+                    else:
+                        logger.info("[VERIFY] camera=%s interval mode", camera_name)
                     if now - last_verify[index] > float(config["verify_interval"]):
                         ensure_data_dir()
                         verify_path = camera_snapshot_path(index)
