@@ -1,0 +1,1071 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fall Detection Control</title>
+  <style>
+    :root {
+      --bg: #081018;
+      --panel: #132130;
+      --panel-2: #0d1722;
+      --text: #f4f8ff;
+      --muted: #9bb1c8;
+      --line: #284158;
+      --accent: #12a9f5;
+      --danger: #ff453a;
+      --ok: #20c26a;
+      --warn: #ffb020;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 14px;
+    }
+    main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 22px;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      margin-bottom: 18px;
+    }
+    h1, h2, h3 { margin: 0; }
+    h1 { font-size: 26px; }
+    h2 { font-size: 18px; margin-bottom: 14px; }
+    p { color: var(--muted); margin: 6px 0 0; }
+    .tabs {
+      display: flex;
+      gap: 18px;
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 14px;
+      overflow-x: auto;
+    }
+    .tab-btn {
+      border: 0;
+      border-bottom: 2px solid transparent;
+      border-radius: 0;
+      background: transparent;
+      color: var(--muted);
+      padding: 12px 0;
+    }
+    .tab-btn.active {
+      color: var(--text);
+      border-color: var(--accent);
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      margin-bottom: 14px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .full { grid-column: 1 / -1; }
+    label {
+      display: block;
+      color: var(--muted);
+      font-weight: 700;
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+    input, textarea, select {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 11px;
+      font: inherit;
+    }
+    textarea { min-height: 120px; resize: vertical; }
+    button {
+      border: 1px solid var(--accent);
+      background: transparent;
+      color: var(--accent);
+      border-radius: 6px;
+      padding: 10px 14px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    button.primary {
+      background: var(--accent);
+      color: #00111d;
+    }
+    button.danger {
+      border-color: var(--danger);
+      color: var(--danger);
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 8px 12px;
+      color: var(--muted);
+      background: var(--panel-2);
+      font-weight: 700;
+    }
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: var(--muted);
+    }
+    .dot.running { background: var(--ok); }
+    .dot.error { background: var(--danger); }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: var(--panel-2);
+    }
+    .card b { display: block; font-size: 18px; margin-top: 4px; }
+    .summary-list {
+      display: grid;
+      gap: 8px;
+    }
+    .summary-item {
+      display: grid;
+      grid-template-columns: minmax(120px, .5fr) minmax(0, 1fr);
+      gap: 10px;
+      border-bottom: 1px solid var(--line);
+      padding: 8px 0;
+    }
+    .summary-item:last-child {
+      border-bottom: 0;
+    }
+    .summary-item span {
+      color: var(--muted);
+      font-weight: 700;
+    }
+    .camera-head,
+    .camera-row {
+      display: grid;
+      grid-template-columns: 58px minmax(100px, .7fr) minmax(210px, 1.2fr) minmax(90px, .55fr) minmax(170px, 1fr) max-content;
+      gap: 8px;
+      align-items: center;
+    }
+    .camera-head {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      margin: 14px 0 6px;
+    }
+    .camera-row {
+      margin-bottom: 8px;
+    }
+    .camera-row > * { min-width: 0; }
+    .camera-row input[type="checkbox"] {
+      width: auto;
+    }
+    .camera-actions {
+      display: flex;
+      gap: 6px;
+      justify-content: flex-end;
+    }
+    .live-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 12px;
+    }
+    .live-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: var(--panel-2);
+    }
+    .live-card h3 {
+      font-size: 14px;
+      padding: 10px;
+      border-bottom: 1px solid var(--line);
+    }
+    .live-card img {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      object-fit: contain;
+      background: #03070b;
+      display: block;
+    }
+    .live-card iframe,
+    .viewer-body iframe {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      border: 0;
+      background: #03070b;
+      display: block;
+    }
+    dialog {
+      width: min(960px, calc(100vw - 28px));
+      max-height: calc(100vh - 28px);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      color: var(--text);
+      padding: 0;
+    }
+    dialog::backdrop {
+      background: rgba(0, 0, 0, .72);
+    }
+    .viewer-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    .viewer-head h2 {
+      margin: 0;
+      font-size: 16px;
+    }
+    .viewer-actions {
+      display: flex;
+      gap: 8px;
+    }
+    .viewer-body {
+      padding: 12px;
+      background: #03070b;
+    }
+    .viewer-body img {
+      width: 100%;
+      max-height: calc(100vh - 160px);
+      object-fit: contain;
+      display: block;
+    }
+    img.preview {
+      width: 100%;
+      max-height: 560px;
+      object-fit: contain;
+      background: #03070b;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    th, td {
+      text-align: left;
+      border-bottom: 1px solid var(--line);
+      padding: 9px 8px;
+      vertical-align: top;
+    }
+    th { color: var(--muted); font-size: 12px; }
+    .event-thumb {
+      width: 76px;
+      height: 46px;
+      object-fit: cover;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #03070b;
+      cursor: pointer;
+      display: block;
+    }
+    pre {
+      white-space: pre-wrap;
+      overflow: auto;
+      background: var(--panel-2);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      min-height: 48px;
+    }
+    .ok { color: var(--ok); }
+    .err { color: var(--danger); }
+    .warn { color: var(--warn); }
+    .hidden { display: none; }
+    @media (max-width: 760px) {
+      main { padding: 14px; }
+      header { flex-direction: column; }
+      .grid, .cards { grid-template-columns: 1fr; }
+      .summary-item { grid-template-columns: 1fr; }
+      .camera-head { display: none; }
+      .camera-row {
+        grid-template-columns: 1fr;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 10px;
+      }
+      .camera-actions {
+        flex-direction: column;
+      }
+      .viewer-head,
+      .viewer-actions {
+        flex-direction: column;
+        align-items: stretch;
+      }
+      button { width: 100%; }
+      .actions { align-items: stretch; flex-direction: column; }
+      th:nth-child(5), td:nth-child(5) { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>Fall Detection Control</h1>
+        <p>YOLO person detection -> AI fall verification -> Telegram alert</p>
+      </div>
+      <div style="display: flex; gap: 12px; align-items: center;">
+        <div class="status-pill"><span id="runDot" class="dot"></span><span id="runText">Stopped</span></div>
+        <form action="/auth/logout" method="post" style="margin: 0;">
+          <button type="submit" class="danger">Logout</button>
+        </form>
+      </div>
+    </header>
+
+    <nav class="tabs">
+      <button class="tab-btn active" data-tab="dashboardPanel" type="button">Dashboard</button>
+      <button class="tab-btn" data-tab="camerasPanel" type="button">Cameras</button>
+      <button class="tab-btn" data-tab="livePanel" type="button">Live</button>
+      <button class="tab-btn" data-tab="settingsPanel" type="button">Settings</button>
+      <button class="tab-btn" data-tab="eventsPanel" type="button">Events</button>
+      <button class="tab-btn" data-tab="toolsPanel" type="button">Tools</button>
+    </nav>
+
+    <section id="dashboardPanel" class="tab-panel">
+      <div class="cards">
+        <div class="card"><span>Events</span><b id="eventCount">0</b></div>
+        <div class="card"><span>Person conf</span><b id="personConf">0</b></div>
+        <div class="card"><span>AI result</span><b id="aiResult">-</b></div>
+        <div class="card"><span>Enabled cameras</span><b id="enabledCameraCount">0</b></div>
+      </div>
+      <div class="panel">
+        <h2>Monitor</h2>
+        <div class="actions">
+          <button id="startBtn" class="primary" type="button">Start</button>
+          <button id="stopBtn" class="danger" type="button">Stop</button>
+          <button id="captureBtn" type="button">Capture Snapshot</button>
+          <button id="refreshStatusBtn" type="button">Refresh</button>
+          <span id="actionStatus"></span>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>System Overview</h2>
+        <div class="summary-list">
+          <div class="summary-item"><span>Last camera</span><div id="lastCamera">-</div></div>
+          <div class="summary-item"><span>Last verify</span><div id="lastVerify">-</div></div>
+          <div class="summary-item"><span>Last alert</span><div id="lastAlert">-</div></div>
+          <div class="summary-item"><span>go2rtc public URL</span><div id="dashboardGo2rtc">-</div></div>
+          <div class="summary-item"><span>AI model</span><div id="dashboardModel">-</div></div>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>Camera Sources</h2>
+        <div id="dashboardCameras" class="summary-list"></div>
+      </div>
+      <div class="panel">
+        <h2>Recent Events</h2>
+        <div id="dashboardEvents" class="summary-list"></div>
+      </div>
+    </section>
+
+    <section id="camerasPanel" class="tab-panel hidden">
+      <div class="panel">
+        <h2>Cameras</h2>
+        <div class="camera-head">
+          <div>Enabled</div>
+          <div>Name</div>
+          <div>RTSP URL</div>
+          <div>go2rtc src</div>
+          <div>Live URL</div>
+          <div>Actions</div>
+        </div>
+        <div id="cameraList"></div>
+        <div class="actions" style="margin-top:14px">
+          <button id="addCameraBtn" type="button">Add Camera</button>
+          <button id="saveCamerasBtn" class="primary" type="button">Save Cameras</button>
+          <span id="cameraStatus"></span>
+        </div>
+      </div>
+    </section>
+
+    <section id="livePanel" class="tab-panel hidden">
+      <div class="panel">
+        <h2>Live Cameras</h2>
+        <div class="actions">
+          <button id="refreshLiveBtn" type="button">Refresh Live</button>
+          <span id="liveStatus"></span>
+        </div>
+        <div id="liveGrid" class="live-grid" style="margin-top:14px"></div>
+      </div>
+    </section>
+
+    <section id="settingsPanel" class="tab-panel hidden">
+      <div class="panel">
+        <h2>Settings</h2>
+        <div class="grid">
+          <div class="full">
+            <label for="rtsp_url">RTSP URL</label>
+            <input id="rtsp_url" autocomplete="off" placeholder="rtsp://10.10.0.2:8554/bep_sub">
+          </div>
+          <div class="full">
+            <label for="go2rtc_url">go2rtc URL</label>
+            <input id="go2rtc_url" autocomplete="off" placeholder="http://10.10.0.2:1984 hoặc https://go2rtc.example">
+          </div>
+          <div>
+            <label for="ai_base_url">AI Base URL</label>
+            <input id="ai_base_url" autocomplete="off" placeholder="https://9router.minhhungtsbd.me/v1">
+          </div>
+          <div>
+            <label for="vision_model">AI Model</label>
+            <input id="vision_model" autocomplete="off" placeholder="gh/oswe-vscode-prime">
+          </div>
+          <div class="full">
+            <label for="verify_prompt">AI Verify Prompt</label>
+            <textarea id="verify_prompt" placeholder="Prompt xác minh té ngã gửi tới AI"></textarea>
+          </div>
+          <div>
+            <label for="ai_api_key">AI API Key</label>
+            <input id="ai_api_key" type="password" autocomplete="new-password">
+          </div>
+          <div>
+            <label for="detection_mode">Detection Mode</label>
+            <select id="detection_mode" disabled>
+              <option value="yolo">YOLO prefilter (Local)</option>
+            </select>
+          </div>
+          <div>
+            <label for="yolo_model">YOLO Model</label>
+            <input id="yolo_model" autocomplete="off" placeholder="yolov8n.pt">
+          </div>
+          <div>
+            <label for="yolo_imgsz">YOLO Image Size</label>
+            <input id="yolo_imgsz" type="number" min="160" step="32" placeholder="416">
+          </div>
+          <div>
+            <label for="confidence">YOLO Confidence</label>
+            <input id="confidence" type="number" min="0.01" max="1" step="0.01">
+          </div>
+          <div>
+            <label for="telegram_bot_token">Telegram Bot Token</label>
+            <input id="telegram_bot_token" type="password" autocomplete="new-password">
+          </div>
+          <div>
+            <label for="telegram_chat_id">Telegram Chat ID</label>
+            <input id="telegram_chat_id" autocomplete="off">
+          </div>
+          <div>
+            <label for="webhook_token">Webhook Token (Bảo vệ API)</label>
+            <input id="webhook_token" type="password" autocomplete="new-password">
+          </div>
+          <div>
+            <label for="verify_interval">Verify Interval (seconds)</label>
+            <input id="verify_interval" type="number" min="1">
+          </div>
+          <div>
+            <label for="alert_cooldown">Alert Cooldown (seconds)</label>
+            <input id="alert_cooldown" type="number" min="1">
+          </div>
+          <div>
+            <label for="frame_skip">Frame Skip</label>
+            <input id="frame_skip" type="number" min="1">
+          </div>
+          <div>
+            <label for="loop_sleep">Loop Sleep (seconds)</label>
+            <input id="loop_sleep" type="number" min="0" step="0.1">
+          </div>
+        </div>
+        <div class="actions" style="margin-top:14px">
+          <button id="saveConfigBtn" class="primary" type="button">Save Settings</button>
+          <button id="reloadConfigBtn" type="button">Reload</button>
+          <span id="configStatus"></span>
+        </div>
+      </div>
+    </section>
+
+    <section id="eventsPanel" class="tab-panel hidden">
+      <div class="panel">
+        <h2>Events</h2>
+        <div class="actions">
+          <button id="refreshEventsBtn" type="button">Refresh Events</button>
+          <button id="clearEventsBtn" type="button" class="danger">Clear All Events</button>
+          <span id="eventsStatus"></span>
+        </div>
+        <table>
+          <thead>
+            <tr><th>Time (UTC+7)</th><th>Image</th><th>Status</th><th>Camera</th><th>Confidence</th><th>AI</th><th>AI Raw / Message</th></tr>
+          </thead>
+          <tbody id="eventsBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="toolsPanel" class="tab-panel hidden">
+      <div class="panel">
+        <h2>Tools</h2>
+        <div class="actions">
+          <button id="testAiBtn" type="button">Test AI With Last Snapshot</button>
+          <button id="testTelegramBtn" type="button">Test Telegram</button>
+          <span id="toolStatus"></span>
+        </div>
+        <div style="margin-top:14px">
+          <label for="uploadImage">Upload image and test AI</label>
+          <input id="uploadImage" type="file" accept="image/*">
+        </div>
+      </div>
+      <div class="panel">
+        <h2>Last Tool Result</h2>
+        <pre id="toolResult">{}</pre>
+      </div>
+    </section>
+
+    <dialog id="viewerDialog">
+      <div class="viewer-head">
+        <h2 id="viewerTitle">Viewer</h2>
+        <div class="viewer-actions">
+          <button id="refreshViewerBtn" type="button">Refresh</button>
+          <button id="openViewerBtn" type="button">Open Tab</button>
+          <button id="closeViewerBtn" type="button">Close</button>
+        </div>
+      </div>
+      <div id="viewerBody" class="viewer-body"></div>
+    </dialog>
+  </main>
+
+  <script>
+    let cameras = [];
+    let currentViewerUrl = "";
+    let currentViewerMode = "";
+    let latestEvents = [];
+    let latestStatus = {};
+    const numericIds = ["confidence", "verify_interval", "alert_cooldown", "frame_skip", "loop_sleep", "yolo_imgsz"];
+    const configIds = [
+      "rtsp_url", "go2rtc_url", "ai_base_url", "ai_api_key", "vision_model", "verify_prompt", "detection_mode", "yolo_model",
+      "telegram_bot_token", "telegram_chat_id", "webhook_token", ...numericIds
+    ];
+
+    function setText(id, value) {
+      document.getElementById(id).textContent = value || "-";
+    }
+    function setStatus(id, text, cls = "") {
+      const el = document.getElementById(id);
+      el.className = cls;
+      el.textContent = text;
+    }
+    async function api(path, options = {}) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), options.timeout || 30000);
+      try {
+        const response = await fetch(path, {...options, signal: controller.signal});
+        if (response.status === 401 || response.status === 403) {
+            window.location.href = '/login';
+            return;
+        }
+        const data = await response.json();
+        if (!response.ok || data.success === false) {
+          throw new Error(data.error || `HTTP ${response.status}`);
+        }
+        return data;
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    function showTab(id) {
+      document.querySelectorAll(".tab-panel").forEach(panel => panel.classList.add("hidden"));
+      document.getElementById(id).classList.remove("hidden");
+      document.querySelectorAll(".tab-btn").forEach(btn => btn.classList.toggle("active", btn.dataset.tab === id));
+      const tabName = id.replace("Panel", "");
+      if (location.hash !== `#${tabName}`) history.replaceState(null, "", `#${tabName}`);
+    }
+    function collectConfig() {
+      const data = {};
+      for (const id of configIds) {
+        const raw = document.getElementById(id).value.trim();
+        data[id] = numericIds.includes(id) ? Number(raw) : raw;
+      }
+      data.cameras = cameras;
+      return data;
+    }
+    function renderConfig(config) {
+      for (const id of configIds) {
+        if (config[id] !== undefined) document.getElementById(id).value = config[id];
+      }
+      cameras = Array.isArray(config.cameras) ? config.cameras : [];
+      renderCameras();
+      renderLive();
+      renderDashboard();
+    }
+    function renderStatus(data) {
+      const s = data.status || {};
+      latestStatus = s;
+      const dot = document.getElementById("runDot");
+      dot.className = "dot" + (s.running ? " running" : "") + (s.last_error ? " error" : "");
+      setText("runText", s.running ? "Running" : "Stopped");
+      setText("eventCount", data.event_count || 0);
+      setText("personConf", s.last_person_confidence ? Number(s.last_person_confidence).toFixed(2) : "0");
+      setText("aiResult", s.last_ai_result ? `${s.last_ai_result} ${s.last_camera ? "(" + s.last_camera + ")" : ""}` : "-");
+      setText("lastVerify", s.last_verify_at || "-");
+      setText("lastCamera", s.last_camera || "-");
+      setText("lastAlert", s.last_alert_at || "-");
+      if (s.last_error) setStatus("actionStatus", s.last_error, "err");
+      renderDashboard();
+    }
+    function renderEvents(events) {
+      latestEvents = events;
+      const body = document.getElementById("eventsBody");
+      body.innerHTML = "";
+      for (const event of events) {
+        const row = document.createElement("tr");
+        const values = [
+          event.time_local || formatLocalTime(event.time),
+          null,
+          event.status || "",
+          event.camera || "",
+          event.confidence ? Number(event.confidence).toFixed(2) : "",
+          event.ai_result || "",
+          event.ai_raw || event.message || event.error || ""
+        ];
+        for (const value of values) {
+          const cell = document.createElement("td");
+          if (value === null) {
+            if (event.image_url) {
+              const img = document.createElement("img");
+              img.className = "event-thumb";
+              img.alt = event.camera || event.status || "event";
+              img.src = event.image_url;
+              img.addEventListener("click", () => showViewer(
+                `Event: ${event.camera || event.status || "image"}`,
+                event.image_url,
+                "snapshot"
+              ));
+              cell.append(img);
+            } else {
+              cell.textContent = "-";
+            }
+          } else {
+            cell.textContent = value;
+          }
+          row.append(cell);
+        }
+        body.append(row);
+      }
+      setStatus("eventsStatus", `Loaded ${events.length} events`, "ok");
+      renderDashboard();
+    }
+    function formatLocalTime(value) {
+      if (!value) return "";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return value;
+      return date.toLocaleString("vi-VN", {
+        timeZone: "Asia/Ho_Chi_Minh",
+        hour12: false,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit"
+      });
+    }
+    function renderDashboard() {
+      const enabled = cameras.map(normalizeCamera).filter(camera => camera.enabled);
+      setText("enabledCameraCount", enabled.length);
+      setText("dashboardGo2rtc", document.getElementById("go2rtc_url").value.trim() || "-");
+      setText("dashboardModel", document.getElementById("vision_model").value.trim() || "-");
+
+      const cameraList = document.getElementById("dashboardCameras");
+      cameraList.innerHTML = "";
+      if (!cameras.length) {
+        const empty = document.createElement("div");
+        empty.className = "summary-item";
+        empty.innerHTML = "<span>Status</span><div>No cameras configured</div>";
+        cameraList.append(empty);
+      } else {
+        cameras.map(normalizeCamera).forEach(camera => {
+          const row = document.createElement("div");
+          row.className = "summary-item";
+          const label = document.createElement("span");
+          label.textContent = camera.name || camera.go2rtc_src || "Camera";
+          const value = document.createElement("div");
+          const live = cameraLiveUrl(camera);
+          value.textContent = `${camera.enabled ? "Enabled" : "Disabled"} | go2rtc src: ${camera.go2rtc_src || "-"} | live: ${live || "Python fallback"} | rtsp: ${camera.rtsp_url || "-"}`;
+          row.append(label, value);
+          cameraList.append(row);
+        });
+      }
+
+      const eventList = document.getElementById("dashboardEvents");
+      eventList.innerHTML = "";
+      for (const event of latestEvents.slice(0, 5)) {
+        const row = document.createElement("div");
+        row.className = "summary-item";
+        const label = document.createElement("span");
+        label.textContent = event.time_local || formatLocalTime(event.time);
+        const value = document.createElement("div");
+        value.textContent = `${event.status || ""}${event.camera ? " | " + event.camera : ""}${event.ai_result ? " | " + event.ai_result : ""}${event.error ? " | " + event.error : ""}`;
+        row.append(label, value);
+        eventList.append(row);
+      }
+      if (!latestEvents.length) {
+        const empty = document.createElement("div");
+        empty.className = "summary-item";
+        empty.innerHTML = "<span>Status</span><div>No events yet</div>";
+        eventList.append(empty);
+      }
+    }
+    function showViewer(title, url, mode) {
+      currentViewerUrl = url;
+      currentViewerMode = mode;
+      document.getElementById("viewerTitle").textContent = title;
+      const body = document.getElementById("viewerBody");
+      body.innerHTML = "";
+      if (mode === "iframe") {
+        const frame = document.createElement("iframe");
+        frame.title = title;
+        frame.src = url;
+        frame.allow = "autoplay; fullscreen; picture-in-picture";
+        body.append(frame);
+      } else {
+        const img = document.createElement("img");
+        img.alt = title;
+        img.src = mode === "snapshot" ? `${url}${url.includes("?") ? "&" : "?"}ts=${Date.now()}` : url;
+        body.append(img);
+      }
+      document.getElementById("refreshViewerBtn").style.display = mode === "snapshot" ? "" : "none";
+      document.getElementById("viewerDialog").showModal();
+    }
+    function closeViewer() {
+      const body = document.getElementById("viewerBody");
+      body.innerHTML = "";
+      document.getElementById("viewerDialog").close();
+      currentViewerUrl = "";
+      currentViewerMode = "";
+    }
+    async function loadConfig() {
+      const data = await api("/api/config");
+      renderConfig(data.config);
+    }
+    async function loadStatus() {
+      const data = await api("/api/status", {timeout: 10000});
+      renderStatus(data);
+    }
+    async function loadEvents() {
+      const data = await api("/api/events", {timeout: 10000});
+      renderEvents(data.events || []);
+    }
+    function normalizeCamera(camera = {}) {
+      return {
+        enabled: camera.enabled !== false,
+        name: camera.name || "",
+        rtsp_url: camera.rtsp_url || "",
+        go2rtc_src: camera.go2rtc_src || "",
+        live_url: camera.live_url || ""
+      };
+    }
+    function streamNameFromRtsp(rtspUrl) {
+      const clean = (rtspUrl || "").trim().split("?")[0].replace(/\/$/, "");
+      const parts = clean.split("/");
+      return parts[parts.length - 1] || "";
+    }
+    function go2rtcStreamUrl(src) {
+      const base = document.getElementById("go2rtc_url").value.trim().replace(/\/$/, "");
+      if (!base || !src) return "";
+      return `${base}/stream.html?src=${encodeURIComponent(src)}&mode=mse`;
+    }
+    function cameraLiveUrl(camera) {
+      const item = normalizeCamera(camera);
+      if (item.live_url.trim()) return item.live_url.trim();
+      if (item.go2rtc_src.trim()) return go2rtcStreamUrl(item.go2rtc_src.trim());
+      return "";
+    }
+    function cameraVideoSource(camera, index) {
+      const direct = cameraLiveUrl(camera);
+      if (direct) return {url: direct, mode: "iframe"};
+      return {url: `/api/camera/video?index=${index}`, mode: "video"};
+    }
+    function cameraSnapshotSource(camera, index) {
+      const item = normalizeCamera(camera);
+      const base = document.getElementById("go2rtc_url").value.trim().replace(/\/$/, "");
+      if (base && item.go2rtc_src.trim()) {
+        return `${base}/api/frame.jpeg?src=${encodeURIComponent(item.go2rtc_src.trim())}`;
+      }
+      return `/api/camera/snapshot?index=${index}`;
+    }
+    function renderCameras() {
+      const list = document.getElementById("cameraList");
+      list.innerHTML = "";
+      cameras = cameras.map(normalizeCamera);
+      cameras.forEach((camera, index) => {
+        const row = document.createElement("div");
+        row.className = "camera-row";
+
+        const enabled = document.createElement("input");
+        enabled.type = "checkbox";
+        enabled.checked = camera.enabled;
+        enabled.addEventListener("change", () => cameras[index].enabled = enabled.checked);
+
+        const name = document.createElement("input");
+        name.placeholder = "bep";
+        name.value = camera.name;
+        name.addEventListener("input", () => {
+          cameras[index].name = name.value;
+          if (!cameras[index].go2rtc_src) {
+            cameras[index].go2rtc_src = name.value.trim();
+            go2rtcSrc.value = cameras[index].go2rtc_src;
+          }
+        });
+
+        const rtsp = document.createElement("input");
+        rtsp.placeholder = "rtsp://10.10.0.2:8554/bep_sub";
+        rtsp.value = camera.rtsp_url;
+        rtsp.addEventListener("input", () => {
+          cameras[index].rtsp_url = rtsp.value;
+          const streamName = streamNameFromRtsp(rtsp.value);
+          if (streamName) {
+            if (!cameras[index].name) {
+              cameras[index].name = streamName;
+              name.value = streamName;
+            }
+            if (!cameras[index].go2rtc_src) {
+              cameras[index].go2rtc_src = streamName;
+              go2rtcSrc.value = streamName;
+            }
+          }
+        });
+
+        const go2rtcSrc = document.createElement("input");
+        go2rtcSrc.placeholder = "bep";
+        go2rtcSrc.value = camera.go2rtc_src;
+        go2rtcSrc.addEventListener("input", () => cameras[index].go2rtc_src = go2rtcSrc.value);
+
+        const liveUrl = document.createElement("input");
+        liveUrl.placeholder = "Optional direct stream.html URL";
+        liveUrl.value = camera.live_url;
+        liveUrl.addEventListener("input", () => cameras[index].live_url = liveUrl.value);
+
+        const actions = document.createElement("div");
+        actions.className = "camera-actions";
+        const snapshot = document.createElement("button");
+        snapshot.type = "button";
+        snapshot.textContent = "Snapshot";
+        snapshot.addEventListener("click", () => showViewer(
+          `Snapshot: ${camera.name || "Camera " + (index + 1)}`,
+          cameraSnapshotSource(cameras[index], index),
+          "snapshot"
+        ));
+        const test = document.createElement("button");
+        test.type = "button";
+        test.textContent = "Test AI";
+        test.addEventListener("click", async () => {
+          const label = camera.name || `Camera ${index + 1}`;
+          setStatus("cameraStatus", `Testing ${label}: capture snapshot and verify AI...`, "warn");
+          test.disabled = true;
+          test.textContent = "Testing...";
+          try {
+            const data = await api(`/api/test-ai-camera?index=${index}`, {method: "POST", timeout: 150000});
+            document.getElementById("toolResult").textContent = JSON.stringify(data, null, 2);
+            setStatus("cameraStatus", `Test ${data.camera || label}: ${data.result || "complete"}`, "ok");
+          } catch (err) {
+            setStatus("cameraStatus", `Test ${label} failed: ${err.message}`, "err");
+          } finally {
+            test.disabled = false;
+            test.textContent = "Test AI";
+          }
+        });
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "danger";
+        remove.textContent = "Remove";
+        remove.addEventListener("click", () => {
+          cameras.splice(index, 1);
+          renderCameras();
+          renderLive();
+        });
+        actions.append(snapshot, test, remove);
+        row.append(enabled, name, rtsp, go2rtcSrc, liveUrl, actions);
+        list.append(row);
+      });
+    }
+    function renderLive() {
+      const grid = document.getElementById("liveGrid");
+      grid.innerHTML = "";
+      const visible = cameras
+        .map((camera, index) => ({camera: normalizeCamera(camera), index}))
+        .filter(item => item.camera.enabled && item.camera.rtsp_url.trim());
+      for (const item of visible) {
+        const camera = item.camera;
+        const index = item.index;
+        const card = document.createElement("div");
+        card.className = "live-card";
+        const title = document.createElement("h3");
+        title.textContent = camera.name || camera.rtsp_url;
+        const source = cameraVideoSource(camera, index);
+        if (source.mode === "iframe") {
+          const frame = document.createElement("iframe");
+          frame.title = title.textContent;
+          frame.src = source.url;
+          frame.allow = "autoplay; fullscreen; picture-in-picture";
+          card.append(title, frame);
+        } else {
+          const img = document.createElement("img");
+          img.alt = title.textContent;
+          img.src = `${source.url}&ts=${Date.now()}`;
+          card.append(title, img);
+        }
+        grid.append(card);
+      }
+      setStatus("liveStatus", visible.length ? `Showing ${visible.length} camera(s)` : "No enabled cameras", visible.length ? "ok" : "warn");
+    }
+
+    document.querySelectorAll(".tab-btn").forEach(btn => btn.addEventListener("click", () => showTab(btn.dataset.tab)));
+    document.getElementById("saveConfigBtn").addEventListener("click", async () => {
+      try {
+        const data = await api("/api/config", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(collectConfig())
+        });
+        renderConfig(data.config);
+        setStatus("configStatus", data.message || "Saved", "ok");
+      } catch (err) {
+        setStatus("configStatus", err.message, "err");
+      }
+    });
+    document.getElementById("reloadConfigBtn").addEventListener("click", () => loadConfig().catch(err => setStatus("configStatus", err.message, "err")));
+    document.getElementById("startBtn").addEventListener("click", async () => {
+      try {
+        await api("/api/start", {method: "POST"});
+        setStatus("actionStatus", "Started", "ok");
+        await loadStatus();
+      } catch (err) {
+        setStatus("actionStatus", err.message, "err");
+      }
+    });
+    document.getElementById("stopBtn").addEventListener("click", async () => {
+      try {
+        await api("/api/stop", {method: "POST"});
+        setStatus("actionStatus", "Stopped", "ok");
+        await loadStatus();
+      } catch (err) {
+        setStatus("actionStatus", err.message, "err");
+      }
+    });
+    document.getElementById("captureBtn").addEventListener("click", async () => {
+      try {
+        const data = await api("/api/capture", {method: "POST", timeout: 20000});
+        setStatus("actionStatus", data.message || "Captured", "ok");
+        await loadStatus();
+      } catch (err) {
+        setStatus("actionStatus", err.message, "err");
+      }
+    });
+    document.getElementById("refreshStatusBtn").addEventListener("click", loadStatus);
+    document.getElementById("addCameraBtn").addEventListener("click", () => {
+      const rtspUrl = document.getElementById("rtsp_url").value.trim();
+      const streamName = streamNameFromRtsp(rtspUrl);
+      cameras.push({enabled: true, name: streamName, rtsp_url: rtspUrl, go2rtc_src: streamName, live_url: ""});
+      renderCameras();
+      renderLive();
+      renderDashboard();
+    });
+    document.getElementById("saveCamerasBtn").addEventListener("click", async () => {
+      try {
+        const data = await api("/api/config", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(collectConfig())
+        });
+        renderConfig(data.config);
+        setStatus("cameraStatus", data.message || "Saved", "ok");
+      } catch (err) {
+        setStatus("cameraStatus", err.message, "err");
+      }
+    });
+    document.getElementById("refreshLiveBtn").addEventListener("click", renderLive);
+    document.getElementById("refreshEventsBtn").addEventListener("click", loadEvents);
+    document.getElementById("clearEventsBtn").addEventListener("click", async () => {
+      if (!confirm("Are you sure you want to delete all events?")) return;
+      try {
+        await api("/api/events", {method: "DELETE"});
+        setStatus("eventsStatus", "All events cleared", "ok");
+        await loadEvents();
+        await loadStatus();
+      } catch (err) {
+        setStatus("eventsStatus", err.message, "err");
+      }
+    });
+    document.getElementById("refreshViewerBtn").addEventListener("click", () => {
+      if (currentViewerUrl && currentViewerMode === "snapshot") {
+        showViewer(document.getElementById("viewerTitle").textContent, currentViewerUrl, currentViewerMode);
+      }
+    });
+    document.getElementById("openViewerBtn").addEventListener("click", () => {
+      if (currentViewerUrl) window.open(currentViewerUrl, "_blank");
+    });
+    document.getElementById("closeViewerBtn").addEventListener("click", closeViewer);
+    document.getElementById("viewerDialog").addEventListener("close", () => {
+      document.getElementById("viewerBody").innerHTML = "";
+    });
+    document.getElementById("testAiBtn").addEventListener("click", async () => {
+      try {
+        const data = await api("/api/test-ai", {method: "POST", timeout: 140000});
+        document.getElementById("toolResult").textContent = JSON.stringify(data, null, 2);
+        setStatus("toolStatus", "AI test complete", "ok");
+      } catch (err) {
+        setStatus("toolStatus", err.message, "err");
+      }
+    });
+    document.getElementById("testTelegramBtn").addEventListener("click", async () => {
+      try {
+        const data = await api("/api/test-telegram", {method: "POST", timeout: 70000});
+        document.getElementById("toolResult").textContent = JSON.stringify(data, null, 2);
+        setStatus("toolStatus", "Telegram test sent", "ok");
+      } catch (err) {
+        setStatus("toolStatus", err.message, "err");
+      }
+    });
+    document.getElementById("uploadImage").addEventListener("change", async event => {
+      const file = event.target.files[0];
+      if (!file) return;
+      if (file.size > 10 * 1024 * 1024) {
+        setStatus("toolStatus", "File too large (max 10MB)", "err");
+        return;
+      }
+      const form = new FormData();
+      form.append("file", file);
+      try {
+        const data = await api("/api/test-ai-upload", {method: "POST", body: form, timeout: 140000});
+        document.getElementById("toolResult").textContent = JSON.stringify(data, null, 2);
+        setStatus("toolStatus", "Upload AI test complete", "ok");
+      } catch (err) {
+        setStatus("toolStatus", err.message, "err");
+      }
+    });
+
+    loadConfig().catch(err => setStatus("configStatus", err.message, "err"));
+    loadStatus().catch(() => {});
+    loadEvents().catch(() => {});
+    const initialTab = `${(location.hash || "#dashboard").slice(1)}Panel`;
+    if (document.getElementById(initialTab)) showTab(initialTab);
+    setInterval(loadStatus, 5000);
+    setInterval(loadEvents, 15000);
+  </script>
+</body>
+</html>

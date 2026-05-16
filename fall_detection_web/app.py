@@ -1,2170 +1,244 @@
-import base64
-import json
+"""Main FastAPI application — Fall Detection Web."""
+
+from __future__ import annotations
+
 import logging
-import os
-import shutil
-import threading
-import time
-from datetime import datetime, timedelta, timezone
+import secrets
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-import requests
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
+from fastapi import Body, Depends, FastAPI, Form, HTTPException, Request, Response, status
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 
+import ai
+import auth
+import config
+import db
+import monitor
+
+logger = logging.getLogger("fall_detection_web")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data"
-CONFIG_PATH = DATA_DIR / "config.json"
-ENV_PATH = ROOT / ".env"
-EVENTS_PATH = DATA_DIR / "events.jsonl"
-EVENT_IMAGES_DIR = DATA_DIR / "event_images"
-SNAPSHOT_PATH = DATA_DIR / "latest.jpg"
-VERIFY_PATH = DATA_DIR / "verify.jpg"
-LOCAL_TZ = timezone(timedelta(hours=7))
 
-DEFAULT_VERIFY_PROMPT = """Bạn là hệ thống xác minh té ngã từ ảnh camera trong nhà.
+# Setup Jinja2 templates
+templates = Jinja2Templates(directory=str(ROOT / "templates"))
 
-Nhiệm vụ:
-- Xác định người có bị té ngã, nằm bất thường dưới đất, gặp nguy hiểm, cần trợ giúp, hoặc cố đứng dậy thất bại không.
-- Nếu có nguy hiểm, dòng 1 chỉ trả lời: EMERGENCY
-- Nếu bình thường, dòng 1 chỉ trả lời: SAFE
-- Dòng 2 mô tả rất ngắn tình huống trong ảnh, tối đa 20 ký tự.
-
-Chỉ trả lời đúng 2 dòng, không giải thích thêm:
-SAFE hoặc EMERGENCY
-Mô tả dưới 20 ký tự
-"""
-
-DEFAULT_CONFIG: dict[str, Any] = {
-    "rtsp_url": "",
-    "go2rtc_url": "",
-    "cameras": [],
-    "telegram_bot_token": "",
-    "telegram_chat_id": "",
-    "ai_base_url": "https://9router.minhhungtsbd.me/v1",
-    "ai_api_key": "",
-    "vision_model": "gh/oswe-vscode-prime",
-    "verify_prompt": DEFAULT_VERIFY_PROMPT,
-    "detection_mode": "frigate",
-    "yolo_model": "yolov8n.pt",
-    "yolo_imgsz": 416,
-    "confidence": 0.5,
-    "verify_interval": 20,
-    "alert_cooldown": 300,
-    "frame_skip": 2,
-    "loop_sleep": 0.3,
-}
-
-ENV_CONFIG_KEYS = {
-    "RTSP_URL": "rtsp_url",
-    "GO2RTC_URL": "go2rtc_url",
-    "TELEGRAM_BOT_TOKEN": "telegram_bot_token",
-    "TELEGRAM_CHAT_ID": "telegram_chat_id",
-    "AI_BASE_URL": "ai_base_url",
-    "AI_API_KEY": "ai_api_key",
-    "VISION_MODEL": "vision_model",
-    "DETECTION_MODE": "detection_mode",
-    "YOLO_MODEL": "yolo_model",
-    "YOLO_IMGSZ": "yolo_imgsz",
-    "CONFIDENCE": "confidence",
-    "VERIFY_INTERVAL": "verify_interval",
-    "ALERT_COOLDOWN": "alert_cooldown",
-    "FRAME_SKIP": "frame_skip",
-    "LOOP_SLEEP": "loop_sleep",
-}
-
-SECRET_CONFIG_KEYS = {
-    "rtsp_url",
-    "telegram_bot_token",
-    "telegram_chat_id",
-    "ai_api_key",
-}
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-logger = logging.getLogger("fall_detection_web")
-
-app = FastAPI(title="Fall Detection Web")
-
-state_lock = threading.Lock()
-stop_event = threading.Event()
-worker_thread: threading.Thread | None = None
-monitor_lock = threading.Lock()
-frigate_lock = threading.Lock()
-frigate_last_verify: dict[str, float] = {}
-frigate_last_alert: dict[str, float] = {}
-status: dict[str, Any] = {
-    "running": False,
-    "started_at": "",
-    "last_camera": "",
-    "last_error": "",
-    "last_person_confidence": 0,
-    "last_ai_result": "",
-    "last_verify_at": "",
-    "last_alert_at": "",
-    "frames": 0,
-    "mode": "",
-}
-
-
-INDEX_HTML = r"""
-<!doctype html>
-<html lang="vi">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Fall Detection Control</title>
-  <style>
-    :root {
-      --bg: #081018;
-      --panel: #132130;
-      --panel-2: #0d1722;
-      --text: #f4f8ff;
-      --muted: #9bb1c8;
-      --line: #284158;
-      --accent: #12a9f5;
-      --danger: #ff453a;
-      --ok: #20c26a;
-      --warn: #ffb020;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      background: var(--bg);
-      color: var(--text);
-      font-family: Arial, Helvetica, sans-serif;
-      font-size: 14px;
-    }
-    main {
-      max-width: 1180px;
-      margin: 0 auto;
-      padding: 22px;
-    }
-    header {
-      display: flex;
-      justify-content: space-between;
-      gap: 16px;
-      align-items: flex-start;
-      margin-bottom: 18px;
-    }
-    h1, h2, h3 { margin: 0; }
-    h1 { font-size: 26px; }
-    h2 { font-size: 18px; margin-bottom: 14px; }
-    p { color: var(--muted); margin: 6px 0 0; }
-    .tabs {
-      display: flex;
-      gap: 18px;
-      border-bottom: 1px solid var(--line);
-      margin-bottom: 14px;
-      overflow-x: auto;
-    }
-    .tab-btn {
-      border: 0;
-      border-bottom: 2px solid transparent;
-      border-radius: 0;
-      background: transparent;
-      color: var(--muted);
-      padding: 12px 0;
-    }
-    .tab-btn.active {
-      color: var(--text);
-      border-color: var(--accent);
-    }
-    .panel {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 18px;
-      margin-bottom: 14px;
-    }
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 14px;
-    }
-    .full { grid-column: 1 / -1; }
-    label {
-      display: block;
-      color: var(--muted);
-      font-weight: 700;
-      font-size: 12px;
-      margin-bottom: 6px;
-    }
-    input, textarea {
-      width: 100%;
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      background: var(--panel-2);
-      color: var(--text);
-      padding: 11px;
-      font: inherit;
-    }
-    textarea { min-height: 120px; resize: vertical; }
-    button {
-      border: 1px solid var(--accent);
-      background: transparent;
-      color: var(--accent);
-      border-radius: 6px;
-      padding: 10px 14px;
-      font-weight: 700;
-      cursor: pointer;
-    }
-    button.primary {
-      background: var(--accent);
-      color: #00111d;
-    }
-    button.danger {
-      border-color: var(--danger);
-      color: var(--danger);
-    }
-    .actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      align-items: center;
-    }
-    .status-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      padding: 8px 12px;
-      color: var(--muted);
-      background: var(--panel-2);
-      font-weight: 700;
-    }
-    .dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 999px;
-      background: var(--muted);
-    }
-    .dot.running { background: var(--ok); }
-    .dot.error { background: var(--danger); }
-    .cards {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 10px;
-      margin-bottom: 14px;
-    }
-    .card {
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 12px;
-      background: var(--panel-2);
-    }
-    .card b { display: block; font-size: 18px; margin-top: 4px; }
-    .summary-list {
-      display: grid;
-      gap: 8px;
-    }
-    .summary-item {
-      display: grid;
-      grid-template-columns: minmax(120px, .5fr) minmax(0, 1fr);
-      gap: 10px;
-      border-bottom: 1px solid var(--line);
-      padding: 8px 0;
-    }
-    .summary-item:last-child {
-      border-bottom: 0;
-    }
-    .summary-item span {
-      color: var(--muted);
-      font-weight: 700;
-    }
-    .camera-head,
-    .camera-row {
-      display: grid;
-      grid-template-columns: 58px minmax(100px, .7fr) minmax(210px, 1.2fr) minmax(90px, .55fr) minmax(170px, 1fr) max-content;
-      gap: 8px;
-      align-items: center;
-    }
-    .camera-head {
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 700;
-      margin: 14px 0 6px;
-    }
-    .camera-row {
-      margin-bottom: 8px;
-    }
-    .camera-row > * { min-width: 0; }
-    .camera-row input[type="checkbox"] {
-      width: auto;
-    }
-    .camera-actions {
-      display: flex;
-      gap: 6px;
-      justify-content: flex-end;
-    }
-    .live-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-      gap: 12px;
-    }
-    .live-card {
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      overflow: hidden;
-      background: var(--panel-2);
-    }
-    .live-card h3 {
-      font-size: 14px;
-      padding: 10px;
-      border-bottom: 1px solid var(--line);
-    }
-    .live-card img {
-      width: 100%;
-      aspect-ratio: 16 / 9;
-      object-fit: contain;
-      background: #03070b;
-      display: block;
-    }
-    .live-card iframe,
-    .viewer-body iframe {
-      width: 100%;
-      aspect-ratio: 16 / 9;
-      border: 0;
-      background: #03070b;
-      display: block;
-    }
-    dialog {
-      width: min(960px, calc(100vw - 28px));
-      max-height: calc(100vh - 28px);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: var(--panel);
-      color: var(--text);
-      padding: 0;
-    }
-    dialog::backdrop {
-      background: rgba(0, 0, 0, .72);
-    }
-    .viewer-head {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 12px;
-      padding: 12px;
-      border-bottom: 1px solid var(--line);
-    }
-    .viewer-head h2 {
-      margin: 0;
-      font-size: 16px;
-    }
-    .viewer-actions {
-      display: flex;
-      gap: 8px;
-    }
-    .viewer-body {
-      padding: 12px;
-      background: #03070b;
-    }
-    .viewer-body img {
-      width: 100%;
-      max-height: calc(100vh - 160px);
-      object-fit: contain;
-      display: block;
-    }
-    img.preview {
-      width: 100%;
-      max-height: 560px;
-      object-fit: contain;
-      background: #03070b;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-    }
-    th, td {
-      text-align: left;
-      border-bottom: 1px solid var(--line);
-      padding: 9px 8px;
-      vertical-align: top;
-    }
-    th { color: var(--muted); font-size: 12px; }
-    .event-thumb {
-      width: 76px;
-      height: 46px;
-      object-fit: cover;
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      background: #03070b;
-      cursor: pointer;
-      display: block;
-    }
-    pre {
-      white-space: pre-wrap;
-      overflow: auto;
-      background: var(--panel-2);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 12px;
-      min-height: 48px;
-    }
-    .ok { color: var(--ok); }
-    .err { color: var(--danger); }
-    .warn { color: var(--warn); }
-    .hidden { display: none; }
-    @media (max-width: 760px) {
-      main { padding: 14px; }
-      header { flex-direction: column; }
-      .grid, .cards { grid-template-columns: 1fr; }
-      .summary-item { grid-template-columns: 1fr; }
-      .camera-head { display: none; }
-      .camera-row {
-        grid-template-columns: 1fr;
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        padding: 10px;
-      }
-      .camera-actions {
-        flex-direction: column;
-      }
-      .viewer-head,
-      .viewer-actions {
-        flex-direction: column;
-        align-items: stretch;
-      }
-      button { width: 100%; }
-      .actions { align-items: stretch; flex-direction: column; }
-      th:nth-child(5), td:nth-child(5) { display: none; }
-    }
-  </style>
-</head>
-<body>
-  <main>
-    <header>
-      <div>
-        <h1>Fall Detection Control</h1>
-        <p>Frigate/OpenVINO person trigger -> AI fall verification -> Telegram alert</p>
-      </div>
-      <div class="status-pill"><span id="runDot" class="dot"></span><span id="runText">Stopped</span></div>
-    </header>
-
-    <nav class="tabs">
-      <button class="tab-btn active" data-tab="dashboardPanel" type="button">Dashboard</button>
-      <button class="tab-btn" data-tab="camerasPanel" type="button">Cameras</button>
-      <button class="tab-btn" data-tab="livePanel" type="button">Live</button>
-      <button class="tab-btn" data-tab="settingsPanel" type="button">Settings</button>
-      <button class="tab-btn" data-tab="eventsPanel" type="button">Events</button>
-      <button class="tab-btn" data-tab="toolsPanel" type="button">Tools</button>
-    </nav>
-
-    <section id="dashboardPanel" class="tab-panel">
-      <div class="cards">
-        <div class="card"><span>Frames</span><b id="frames">0</b></div>
-        <div class="card"><span>Person conf</span><b id="personConf">0</b></div>
-        <div class="card"><span>AI result</span><b id="aiResult">-</b></div>
-        <div class="card"><span>Enabled cameras</span><b id="enabledCameraCount">0</b></div>
-      </div>
-      <div class="panel">
-        <h2>Monitor</h2>
-        <div class="actions">
-          <button id="startBtn" class="primary" type="button">Start</button>
-          <button id="stopBtn" class="danger" type="button">Stop</button>
-          <button id="captureBtn" type="button">Capture Snapshot</button>
-          <button id="refreshStatusBtn" type="button">Refresh</button>
-          <span id="actionStatus"></span>
-        </div>
-      </div>
-      <div class="panel">
-        <h2>System Overview</h2>
-        <div class="summary-list">
-          <div class="summary-item"><span>Last camera</span><div id="lastCamera">-</div></div>
-          <div class="summary-item"><span>Last verify</span><div id="lastVerify">-</div></div>
-          <div class="summary-item"><span>Last alert</span><div id="lastAlert">-</div></div>
-          <div class="summary-item"><span>go2rtc public URL</span><div id="dashboardGo2rtc">-</div></div>
-          <div class="summary-item"><span>AI model</span><div id="dashboardModel">-</div></div>
-        </div>
-      </div>
-      <div class="panel">
-        <h2>Camera Sources</h2>
-        <div id="dashboardCameras" class="summary-list"></div>
-      </div>
-      <div class="panel">
-        <h2>Recent Events</h2>
-        <div id="dashboardEvents" class="summary-list"></div>
-      </div>
-    </section>
-
-    <section id="camerasPanel" class="tab-panel hidden">
-      <div class="panel">
-        <h2>Cameras</h2>
-        <div class="camera-head">
-          <div>Enabled</div>
-          <div>Name</div>
-          <div>RTSP URL</div>
-          <div>go2rtc src</div>
-          <div>Live URL</div>
-          <div>Actions</div>
-        </div>
-        <div id="cameraList"></div>
-        <div class="actions" style="margin-top:14px">
-          <button id="addCameraBtn" type="button">Add Camera</button>
-          <button id="saveCamerasBtn" class="primary" type="button">Save Cameras</button>
-          <span id="cameraStatus"></span>
-        </div>
-      </div>
-    </section>
-
-    <section id="livePanel" class="tab-panel hidden">
-      <div class="panel">
-        <h2>Live Cameras</h2>
-        <div class="actions">
-          <button id="refreshLiveBtn" type="button">Refresh Live</button>
-          <span id="liveStatus"></span>
-        </div>
-        <div id="liveGrid" class="live-grid" style="margin-top:14px"></div>
-      </div>
-    </section>
-
-    <section id="settingsPanel" class="tab-panel hidden">
-      <div class="panel">
-        <h2>Settings</h2>
-        <div class="grid">
-          <div class="full">
-            <label for="rtsp_url">RTSP URL</label>
-            <input id="rtsp_url" autocomplete="off" placeholder="rtsp://10.10.0.2:8554/bep_sub">
-          </div>
-          <div class="full">
-            <label for="go2rtc_url">go2rtc URL</label>
-            <input id="go2rtc_url" autocomplete="off" placeholder="http://10.10.0.2:1984 hoặc https://go2rtc.example">
-          </div>
-          <div>
-            <label for="ai_base_url">AI Base URL</label>
-            <input id="ai_base_url" autocomplete="off" placeholder="https://9router.minhhungtsbd.me/v1">
-          </div>
-          <div>
-            <label for="vision_model">AI Model</label>
-            <input id="vision_model" autocomplete="off" placeholder="gh/oswe-vscode-prime">
-          </div>
-          <div class="full">
-            <label for="verify_prompt">AI Verify Prompt</label>
-            <textarea id="verify_prompt" placeholder="Prompt xác minh té ngã gửi tới AI"></textarea>
-          </div>
-          <div>
-            <label for="ai_api_key">AI API Key</label>
-            <input id="ai_api_key" type="password" autocomplete="new-password">
-          </div>
-          <div>
-            <label for="detection_mode">Detection Mode</label>
-            <select id="detection_mode">
-              <option value="frigate">Frigate/OpenVINO trigger</option>
-              <option value="yolo">YOLO prefilter</option>
-              <option value="interval">AI interval only</option>
-            </select>
-          </div>
-          <div>
-            <label for="yolo_model">YOLO Model</label>
-            <input id="yolo_model" autocomplete="off" placeholder="yolov8n.pt">
-          </div>
-          <div>
-            <label for="yolo_imgsz">YOLO Image Size</label>
-            <input id="yolo_imgsz" type="number" min="160" step="32" placeholder="416">
-          </div>
-          <div>
-            <label for="telegram_bot_token">Telegram Bot Token</label>
-            <input id="telegram_bot_token" type="password" autocomplete="new-password">
-          </div>
-          <div>
-            <label for="telegram_chat_id">Telegram Chat ID</label>
-            <input id="telegram_chat_id" autocomplete="off">
-          </div>
-          <div>
-            <label for="confidence">YOLO Confidence</label>
-            <input id="confidence" type="number" min="0.01" max="1" step="0.01">
-          </div>
-          <div>
-            <label for="verify_interval">Verify Interval (seconds)</label>
-            <input id="verify_interval" type="number" min="1">
-          </div>
-          <div>
-            <label for="alert_cooldown">Alert Cooldown (seconds)</label>
-            <input id="alert_cooldown" type="number" min="1">
-          </div>
-          <div>
-            <label for="frame_skip">Frame Skip</label>
-            <input id="frame_skip" type="number" min="1">
-          </div>
-          <div>
-            <label for="loop_sleep">Loop Sleep (seconds)</label>
-            <input id="loop_sleep" type="number" min="0" step="0.1">
-          </div>
-        </div>
-        <div class="actions" style="margin-top:14px">
-          <button id="saveConfigBtn" class="primary" type="button">Save Settings</button>
-          <button id="reloadConfigBtn" type="button">Reload</button>
-          <span id="configStatus"></span>
-        </div>
-      </div>
-    </section>
-
-    <section id="eventsPanel" class="tab-panel hidden">
-      <div class="panel">
-        <h2>Events</h2>
-        <div class="actions">
-          <button id="refreshEventsBtn" type="button">Refresh Events</button>
-          <span id="eventsStatus"></span>
-        </div>
-        <table>
-          <thead>
-            <tr><th>Time (UTC+7)</th><th>Image</th><th>Status</th><th>Camera</th><th>Confidence</th><th>AI</th><th>AI Raw / Message</th></tr>
-          </thead>
-          <tbody id="eventsBody"></tbody>
-        </table>
-      </div>
-    </section>
-
-    <section id="toolsPanel" class="tab-panel hidden">
-      <div class="panel">
-        <h2>Tools</h2>
-        <div class="actions">
-          <button id="testAiBtn" type="button">Test AI With Last Snapshot</button>
-          <button id="testTelegramBtn" type="button">Test Telegram</button>
-          <span id="toolStatus"></span>
-        </div>
-        <div style="margin-top:14px">
-          <label for="uploadImage">Upload image and test AI</label>
-          <input id="uploadImage" type="file" accept="image/*">
-        </div>
-      </div>
-      <div class="panel">
-        <h2>Last Tool Result</h2>
-        <pre id="toolResult">{}</pre>
-      </div>
-    </section>
-
-    <dialog id="viewerDialog">
-      <div class="viewer-head">
-        <h2 id="viewerTitle">Viewer</h2>
-        <div class="viewer-actions">
-          <button id="refreshViewerBtn" type="button">Refresh</button>
-          <button id="openViewerBtn" type="button">Open Tab</button>
-          <button id="closeViewerBtn" type="button">Close</button>
-        </div>
-      </div>
-      <div id="viewerBody" class="viewer-body"></div>
-    </dialog>
-  </main>
-
-  <script>
-    let cameras = [];
-    let currentViewerUrl = "";
-    let currentViewerMode = "";
-    let latestEvents = [];
-    let latestStatus = {};
-    const numericIds = ["confidence", "verify_interval", "alert_cooldown", "frame_skip", "loop_sleep", "yolo_imgsz"];
-    const configIds = [
-      "rtsp_url", "go2rtc_url", "ai_base_url", "ai_api_key", "vision_model", "verify_prompt", "detection_mode", "yolo_model",
-      "telegram_bot_token", "telegram_chat_id", ...numericIds
-    ];
-
-    function setText(id, value) {
-      document.getElementById(id).textContent = value || "-";
-    }
-    function setStatus(id, text, cls = "") {
-      const el = document.getElementById(id);
-      el.className = cls;
-      el.textContent = text;
-    }
-    async function api(path, options = {}) {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), options.timeout || 30000);
-      try {
-        const response = await fetch(path, {...options, signal: controller.signal});
-        const data = await response.json();
-        if (!response.ok || data.success === false) {
-          throw new Error(data.error || `HTTP ${response.status}`);
-        }
-        return data;
-      } finally {
-        clearTimeout(timer);
-      }
-    }
-    function showTab(id) {
-      document.querySelectorAll(".tab-panel").forEach(panel => panel.classList.add("hidden"));
-      document.getElementById(id).classList.remove("hidden");
-      document.querySelectorAll(".tab-btn").forEach(btn => btn.classList.toggle("active", btn.dataset.tab === id));
-      const tabName = id.replace("Panel", "");
-      if (location.hash !== `#${tabName}`) history.replaceState(null, "", `#${tabName}`);
-    }
-    function collectConfig() {
-      const data = {};
-      for (const id of configIds) {
-        const raw = document.getElementById(id).value.trim();
-        data[id] = numericIds.includes(id) ? Number(raw) : raw;
-      }
-      data.cameras = cameras;
-      return data;
-    }
-    function renderConfig(config) {
-      for (const id of configIds) {
-        if (config[id] !== undefined) document.getElementById(id).value = config[id];
-      }
-      cameras = Array.isArray(config.cameras) ? config.cameras : [];
-      renderCameras();
-      renderLive();
-      renderDashboard();
-    }
-    function renderStatus(data) {
-      const s = data.status || {};
-      latestStatus = s;
-      const dot = document.getElementById("runDot");
-      dot.className = "dot" + (s.running ? " running" : "") + (s.last_error ? " error" : "");
-      setText("runText", s.running ? "Running" : "Stopped");
-      setText("frames", s.frames || 0);
-      setText("personConf", s.last_person_confidence ? Number(s.last_person_confidence).toFixed(2) : "0");
-      setText("aiResult", s.last_ai_result ? `${s.last_ai_result} ${s.last_camera ? "(" + s.last_camera + ")" : ""}` : "-");
-      setText("lastVerify", s.last_verify_at || "-");
-      setText("lastCamera", s.last_camera || "-");
-      setText("lastAlert", s.last_alert_at || "-");
-      if (s.last_error) setStatus("actionStatus", s.last_error, "err");
-      renderDashboard();
-    }
-    function renderEvents(events) {
-      latestEvents = events;
-      const body = document.getElementById("eventsBody");
-      body.innerHTML = "";
-      for (const event of events) {
-        const row = document.createElement("tr");
-        const values = [
-          event.time_local || formatLocalTime(event.time),
-          null,
-          event.status || "",
-          event.camera || "",
-          event.confidence ? Number(event.confidence).toFixed(2) : "",
-          event.ai_result || "",
-          event.ai_raw || event.message || event.error || ""
-        ];
-        for (const value of values) {
-          const cell = document.createElement("td");
-          if (value === null) {
-            if (event.image_url) {
-              const img = document.createElement("img");
-              img.className = "event-thumb";
-              img.alt = event.camera || event.status || "event";
-              img.src = event.image_url;
-              img.addEventListener("click", () => showViewer(
-                `Event: ${event.camera || event.status || "image"}`,
-                event.image_url,
-                "snapshot"
-              ));
-              cell.append(img);
-            } else {
-              cell.textContent = "-";
-            }
-          } else {
-            cell.textContent = value;
-          }
-          row.append(cell);
-        }
-        body.append(row);
-      }
-      setStatus("eventsStatus", `Loaded ${events.length} events`, "ok");
-      renderDashboard();
-    }
-    function formatLocalTime(value) {
-      if (!value) return "";
-      const date = new Date(value);
-      if (Number.isNaN(date.getTime())) return value;
-      return date.toLocaleString("vi-VN", {
-        timeZone: "Asia/Ho_Chi_Minh",
-        hour12: false,
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit"
-      });
-    }
-    function renderDashboard() {
-      const enabled = cameras.map(normalizeCamera).filter(camera => camera.enabled);
-      setText("enabledCameraCount", enabled.length);
-      setText("dashboardGo2rtc", document.getElementById("go2rtc_url").value.trim() || "-");
-      setText("dashboardModel", document.getElementById("vision_model").value.trim() || "-");
-
-      const cameraList = document.getElementById("dashboardCameras");
-      cameraList.innerHTML = "";
-      if (!cameras.length) {
-        const empty = document.createElement("div");
-        empty.className = "summary-item";
-        empty.innerHTML = "<span>Status</span><div>No cameras configured</div>";
-        cameraList.append(empty);
-      } else {
-        cameras.map(normalizeCamera).forEach(camera => {
-          const row = document.createElement("div");
-          row.className = "summary-item";
-          const label = document.createElement("span");
-          label.textContent = camera.name || camera.go2rtc_src || "Camera";
-          const value = document.createElement("div");
-          const live = cameraLiveUrl(camera);
-          value.textContent = `${camera.enabled ? "Enabled" : "Disabled"} | go2rtc src: ${camera.go2rtc_src || "-"} | live: ${live || "Python fallback"} | rtsp: ${camera.rtsp_url || "-"}`;
-          row.append(label, value);
-          cameraList.append(row);
-        });
-      }
-
-      const eventList = document.getElementById("dashboardEvents");
-      eventList.innerHTML = "";
-      for (const event of latestEvents.slice(0, 5)) {
-        const row = document.createElement("div");
-        row.className = "summary-item";
-        const label = document.createElement("span");
-        label.textContent = event.time_local || formatLocalTime(event.time);
-        const value = document.createElement("div");
-        value.textContent = `${event.status || ""}${event.camera ? " | " + event.camera : ""}${event.ai_result ? " | " + event.ai_result : ""}${event.error ? " | " + event.error : ""}`;
-        row.append(label, value);
-        eventList.append(row);
-      }
-      if (!latestEvents.length) {
-        const empty = document.createElement("div");
-        empty.className = "summary-item";
-        empty.innerHTML = "<span>Status</span><div>No events yet</div>";
-        eventList.append(empty);
-      }
-    }
-    function showViewer(title, url, mode) {
-      currentViewerUrl = url;
-      currentViewerMode = mode;
-      document.getElementById("viewerTitle").textContent = title;
-      const body = document.getElementById("viewerBody");
-      body.innerHTML = "";
-      if (mode === "iframe") {
-        const frame = document.createElement("iframe");
-        frame.title = title;
-        frame.src = url;
-        frame.allow = "autoplay; fullscreen; picture-in-picture";
-        body.append(frame);
-      } else {
-        const img = document.createElement("img");
-        img.alt = title;
-        img.src = mode === "snapshot" ? `${url}${url.includes("?") ? "&" : "?"}ts=${Date.now()}` : url;
-        body.append(img);
-      }
-      document.getElementById("refreshViewerBtn").style.display = mode === "snapshot" ? "" : "none";
-      document.getElementById("viewerDialog").showModal();
-    }
-    function closeViewer() {
-      const body = document.getElementById("viewerBody");
-      body.innerHTML = "";
-      document.getElementById("viewerDialog").close();
-      currentViewerUrl = "";
-      currentViewerMode = "";
-    }
-    async function loadConfig() {
-      const data = await api("/api/config");
-      renderConfig(data.config);
-    }
-    async function loadStatus() {
-      const data = await api("/api/status", {timeout: 10000});
-      renderStatus(data);
-    }
-    async function loadEvents() {
-      const data = await api("/api/events", {timeout: 10000});
-      renderEvents(data.events || []);
-    }
-    function normalizeCamera(camera = {}) {
-      return {
-        enabled: camera.enabled !== false,
-        name: camera.name || "",
-        rtsp_url: camera.rtsp_url || "",
-        go2rtc_src: camera.go2rtc_src || "",
-        live_url: camera.live_url || ""
-      };
-    }
-    function streamNameFromRtsp(rtspUrl) {
-      const clean = (rtspUrl || "").trim().split("?")[0].replace(/\/$/, "");
-      const parts = clean.split("/");
-      return parts[parts.length - 1] || "";
-    }
-    function go2rtcStreamUrl(src) {
-      const base = document.getElementById("go2rtc_url").value.trim().replace(/\/$/, "");
-      if (!base || !src) return "";
-      return `${base}/stream.html?src=${encodeURIComponent(src)}&mode=mse`;
-    }
-    function cameraLiveUrl(camera) {
-      const item = normalizeCamera(camera);
-      if (item.live_url.trim()) return item.live_url.trim();
-      if (item.go2rtc_src.trim()) return go2rtcStreamUrl(item.go2rtc_src.trim());
-      return "";
-    }
-    function cameraVideoSource(camera, index) {
-      const direct = cameraLiveUrl(camera);
-      if (direct) return {url: direct, mode: "iframe"};
-      return {url: `/api/camera/video?index=${index}`, mode: "video"};
-    }
-    function cameraSnapshotSource(camera, index) {
-      const item = normalizeCamera(camera);
-      const base = document.getElementById("go2rtc_url").value.trim().replace(/\/$/, "");
-      if (base && item.go2rtc_src.trim()) {
-        return `${base}/api/frame.jpeg?src=${encodeURIComponent(item.go2rtc_src.trim())}`;
-      }
-      return `/api/camera/snapshot?index=${index}`;
-    }
-    function renderCameras() {
-      const list = document.getElementById("cameraList");
-      list.innerHTML = "";
-      cameras = cameras.map(normalizeCamera);
-      cameras.forEach((camera, index) => {
-        const row = document.createElement("div");
-        row.className = "camera-row";
-
-        const enabled = document.createElement("input");
-        enabled.type = "checkbox";
-        enabled.checked = camera.enabled;
-        enabled.addEventListener("change", () => cameras[index].enabled = enabled.checked);
-
-        const name = document.createElement("input");
-        name.placeholder = "bep";
-        name.value = camera.name;
-        name.addEventListener("input", () => {
-          cameras[index].name = name.value;
-          if (!cameras[index].go2rtc_src) {
-            cameras[index].go2rtc_src = name.value.trim();
-            go2rtcSrc.value = cameras[index].go2rtc_src;
-          }
-        });
-
-        const rtsp = document.createElement("input");
-        rtsp.placeholder = "rtsp://10.10.0.2:8554/bep_sub";
-        rtsp.value = camera.rtsp_url;
-        rtsp.addEventListener("input", () => {
-          cameras[index].rtsp_url = rtsp.value;
-          const streamName = streamNameFromRtsp(rtsp.value);
-          if (streamName) {
-            if (!cameras[index].name) {
-              cameras[index].name = streamName;
-              name.value = streamName;
-            }
-            if (!cameras[index].go2rtc_src) {
-              cameras[index].go2rtc_src = streamName;
-              go2rtcSrc.value = streamName;
-            }
-          }
-        });
-
-        const go2rtcSrc = document.createElement("input");
-        go2rtcSrc.placeholder = "bep";
-        go2rtcSrc.value = camera.go2rtc_src;
-        go2rtcSrc.addEventListener("input", () => cameras[index].go2rtc_src = go2rtcSrc.value);
-
-        const liveUrl = document.createElement("input");
-        liveUrl.placeholder = "Optional direct stream.html URL";
-        liveUrl.value = camera.live_url;
-        liveUrl.addEventListener("input", () => cameras[index].live_url = liveUrl.value);
-
-        const actions = document.createElement("div");
-        actions.className = "camera-actions";
-        const snapshot = document.createElement("button");
-        snapshot.type = "button";
-        snapshot.textContent = "Snapshot";
-        snapshot.addEventListener("click", () => showViewer(
-          `Snapshot: ${camera.name || "Camera " + (index + 1)}`,
-          cameraSnapshotSource(cameras[index], index),
-          "snapshot"
-        ));
-        const video = document.createElement("button");
-        video.type = "button";
-        video.textContent = "Video";
-        video.addEventListener("click", () => {
-          const source = cameraVideoSource(cameras[index], index);
-          showViewer(`Video: ${camera.name || "Camera " + (index + 1)}`, source.url, source.mode);
-        });
-        const test = document.createElement("button");
-        test.type = "button";
-        test.textContent = "Test AI";
-        test.addEventListener("click", async () => {
-          const label = camera.name || `Camera ${index + 1}`;
-          setStatus("cameraStatus", `Testing ${label}: capture snapshot and verify AI...`, "warn");
-          test.disabled = true;
-          test.textContent = "Testing...";
-          try {
-            const data = await api(`/api/test-ai-camera?index=${index}`, {method: "POST", timeout: 150000});
-            document.getElementById("toolResult").textContent = JSON.stringify(data, null, 2);
-            setStatus("cameraStatus", `Test ${data.camera || label}: ${data.result || "complete"}`, "ok");
-          } catch (err) {
-            setStatus("cameraStatus", `Test ${label} failed: ${err.message}`, "err");
-          } finally {
-            test.disabled = false;
-            test.textContent = "Test AI";
-          }
-        });
-        const remove = document.createElement("button");
-        remove.type = "button";
-        remove.className = "danger";
-        remove.textContent = "Remove";
-        remove.addEventListener("click", () => {
-          cameras.splice(index, 1);
-          renderCameras();
-          renderLive();
-        });
-        actions.append(snapshot, video, test, remove);
-        row.append(enabled, name, rtsp, go2rtcSrc, liveUrl, actions);
-        list.append(row);
-      });
-    }
-    function renderLive() {
-      const grid = document.getElementById("liveGrid");
-      grid.innerHTML = "";
-      const visible = cameras
-        .map((camera, index) => ({camera: normalizeCamera(camera), index}))
-        .filter(item => item.camera.enabled && item.camera.rtsp_url.trim());
-      for (const item of visible) {
-        const camera = item.camera;
-        const index = item.index;
-        const card = document.createElement("div");
-        card.className = "live-card";
-        const title = document.createElement("h3");
-        title.textContent = camera.name || camera.rtsp_url;
-        const source = cameraVideoSource(camera, index);
-        if (source.mode === "iframe") {
-          const frame = document.createElement("iframe");
-          frame.title = title.textContent;
-          frame.src = source.url;
-          frame.allow = "autoplay; fullscreen; picture-in-picture";
-          card.append(title, frame);
-        } else {
-          const img = document.createElement("img");
-          img.alt = title.textContent;
-          img.src = `${source.url}&ts=${Date.now()}`;
-          card.append(title, img);
-        }
-        grid.append(card);
-      }
-      setStatus("liveStatus", visible.length ? `Showing ${visible.length} camera(s)` : "No enabled cameras", visible.length ? "ok" : "warn");
-    }
-
-    document.querySelectorAll(".tab-btn").forEach(btn => btn.addEventListener("click", () => showTab(btn.dataset.tab)));
-    document.getElementById("saveConfigBtn").addEventListener("click", async () => {
-      try {
-        const data = await api("/api/config", {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify(collectConfig())
-        });
-        renderConfig(data.config);
-        setStatus("configStatus", data.message || "Saved", "ok");
-      } catch (err) {
-        setStatus("configStatus", err.message, "err");
-      }
-    });
-    document.getElementById("reloadConfigBtn").addEventListener("click", () => loadConfig().catch(err => setStatus("configStatus", err.message, "err")));
-    document.getElementById("startBtn").addEventListener("click", async () => {
-      try {
-        await api("/api/start", {method: "POST"});
-        setStatus("actionStatus", "Started", "ok");
-        await loadStatus();
-      } catch (err) {
-        setStatus("actionStatus", err.message, "err");
-      }
-    });
-    document.getElementById("stopBtn").addEventListener("click", async () => {
-      try {
-        await api("/api/stop", {method: "POST"});
-        setStatus("actionStatus", "Stopped", "ok");
-        await loadStatus();
-      } catch (err) {
-        setStatus("actionStatus", err.message, "err");
-      }
-    });
-    document.getElementById("captureBtn").addEventListener("click", async () => {
-      try {
-        const data = await api("/api/capture", {method: "POST", timeout: 20000});
-        setStatus("actionStatus", data.message || "Captured", "ok");
-        await loadStatus();
-      } catch (err) {
-        setStatus("actionStatus", err.message, "err");
-      }
-    });
-    document.getElementById("refreshStatusBtn").addEventListener("click", loadStatus);
-    document.getElementById("addCameraBtn").addEventListener("click", () => {
-      const rtspUrl = document.getElementById("rtsp_url").value.trim();
-      const streamName = streamNameFromRtsp(rtspUrl);
-      cameras.push({enabled: true, name: streamName, rtsp_url: rtspUrl, go2rtc_src: streamName, live_url: ""});
-      renderCameras();
-      renderLive();
-      renderDashboard();
-    });
-    document.getElementById("saveCamerasBtn").addEventListener("click", async () => {
-      try {
-        const data = await api("/api/config", {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify(collectConfig())
-        });
-        renderConfig(data.config);
-        setStatus("cameraStatus", data.message || "Saved", "ok");
-      } catch (err) {
-        setStatus("cameraStatus", err.message, "err");
-      }
-    });
-    document.getElementById("refreshLiveBtn").addEventListener("click", renderLive);
-    document.getElementById("refreshEventsBtn").addEventListener("click", loadEvents);
-    document.getElementById("refreshViewerBtn").addEventListener("click", () => {
-      if (currentViewerUrl && currentViewerMode === "snapshot") {
-        showViewer(document.getElementById("viewerTitle").textContent, currentViewerUrl, currentViewerMode);
-      }
-    });
-    document.getElementById("openViewerBtn").addEventListener("click", () => {
-      if (currentViewerUrl) window.open(currentViewerUrl, "_blank");
-    });
-    document.getElementById("closeViewerBtn").addEventListener("click", closeViewer);
-    document.getElementById("viewerDialog").addEventListener("close", () => {
-      document.getElementById("viewerBody").innerHTML = "";
-    });
-    document.getElementById("testAiBtn").addEventListener("click", async () => {
-      try {
-        const data = await api("/api/test-ai", {method: "POST", timeout: 140000});
-        document.getElementById("toolResult").textContent = JSON.stringify(data, null, 2);
-        setStatus("toolStatus", "AI test complete", "ok");
-      } catch (err) {
-        setStatus("toolStatus", err.message, "err");
-      }
-    });
-    document.getElementById("testTelegramBtn").addEventListener("click", async () => {
-      try {
-        const data = await api("/api/test-telegram", {method: "POST", timeout: 70000});
-        document.getElementById("toolResult").textContent = JSON.stringify(data, null, 2);
-        setStatus("toolStatus", "Telegram test sent", "ok");
-      } catch (err) {
-        setStatus("toolStatus", err.message, "err");
-      }
-    });
-    document.getElementById("uploadImage").addEventListener("change", async event => {
-      const file = event.target.files[0];
-      if (!file) return;
-      const form = new FormData();
-      form.append("file", file);
-      try {
-        const data = await api("/api/test-ai-upload", {method: "POST", body: form, timeout: 140000});
-        document.getElementById("toolResult").textContent = JSON.stringify(data, null, 2);
-        setStatus("toolStatus", "Upload AI test complete", "ok");
-      } catch (err) {
-        setStatus("toolStatus", err.message, "err");
-      }
-    });
-
-    loadConfig().catch(err => setStatus("configStatus", err.message, "err"));
-    loadStatus().catch(() => {});
-    loadEvents().catch(() => {});
-    const initialTab = `${(location.hash || "#dashboard").slice(1)}Panel`;
-    if (document.getElementById(initialTab)) showTab(initialTab);
-    setInterval(loadStatus, 5000);
-    setInterval(loadEvents, 15000);
-  </script>
-</body>
-</html>
-"""
-
-
-def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
-
-
-def local_iso() -> str:
-    return datetime.now(LOCAL_TZ).isoformat(timespec="seconds")
-
-
-def ensure_data_dir() -> None:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    EVENT_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
-
-
-def parse_env_file(path: Path) -> dict[str, str]:
-    if not path.exists():
-        return {}
-    values: dict[str, str] = {}
-    for raw_line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        if key:
-            values[key] = value
-    return values
-
-
-def coerce_config_value(key: str, value: str) -> Any:
-    if key in {"verify_interval", "alert_cooldown", "frame_skip", "yolo_imgsz"}:
-        return positive_int(value, key)
-    if key == "confidence":
-        return clamp_float(value, 0.01, 1.0, key)
-    if key == "loop_sleep":
-        return max(0.0, float(value))
-    return value
-
-
-def env_config_values() -> tuple[dict[str, Any], dict[str, str]]:
-    raw_env = parse_env_file(ENV_PATH)
-    raw_env.update(os.environ)
-    values: dict[str, Any] = {}
-    sources: dict[str, str] = {}
-    for env_key, config_key in ENV_CONFIG_KEYS.items():
-        raw_value = raw_env.get(env_key, "")
-        if raw_value == "":
-            continue
-        try:
-            values[config_key] = coerce_config_value(config_key, raw_value)
-            sources[config_key] = env_key
-        except ValueError as exc:
-            logger.warning("Ignoring invalid %s value from environment: %s", env_key, exc)
-    return values, sources
-
-
-def read_stored_config() -> dict[str, Any]:
-    ensure_data_dir()
-    if not CONFIG_PATH.exists():
-        return DEFAULT_CONFIG.copy()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    db.init_db()
+    config.migrate_config_json()   # one-time: config.json → DB
+    current_config = config.read_config()
+    
+    # Init auth secret
+    jwt_secret = secrets.token_urlsafe(32)
+    auth.configure_secret(jwt_secret)
+    
+    # Create default admin if no users
+    if not db.list_users():
+        logger.info("No users found. Creating default admin: admin/admin")
+        db.create_user("admin", auth.hash_password("admin"))
+    
+    # Auto-start monitor
     try:
-        data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return DEFAULT_CONFIG.copy()
-    config = DEFAULT_CONFIG.copy()
-    if isinstance(data, dict):
-        config.update(data)
-    prompt = str(config.get("verify_prompt", ""))
-    if "Chỉ trả lời đúng 1 từ" in prompt and "Chỉ trả lời đúng 2 dòng" not in prompt:
-        config["verify_prompt"] = DEFAULT_VERIFY_PROMPT
-    return config
-
-
-def read_config() -> dict[str, Any]:
-    config = read_stored_config()
-    env_values, _ = env_config_values()
-    config.update(env_values)
-    config["cameras"] = normalize_cameras(config)
-    return config
-
-
-def normalize_cameras(config: dict[str, Any]) -> list[dict[str, Any]]:
-    raw_cameras = config.get("cameras", [])
-    cameras: list[dict[str, Any]] = []
-    if isinstance(raw_cameras, list):
-        for index, camera in enumerate(raw_cameras):
-            if not isinstance(camera, dict):
-                continue
-            rtsp_url = str(camera.get("rtsp_url", "")).strip()
-            go2rtc_src = str(camera.get("go2rtc_src", "")).strip()
-            live_url = str(camera.get("live_url", "")).strip()
-            name = str(camera.get("name", "")).strip() or f"Camera {index + 1}"
-            cameras.append({
-                "enabled": camera.get("enabled") is not False,
-                "name": name,
-                "rtsp_url": rtsp_url,
-                "go2rtc_src": go2rtc_src,
-                "live_url": live_url,
-            })
-    fallback_rtsp = str(config.get("rtsp_url", "")).strip()
-    if not cameras and fallback_rtsp:
-        cameras.append({"enabled": True, "name": "Default", "rtsp_url": fallback_rtsp, "go2rtc_src": "", "live_url": ""})
-    return cameras
-
-
-def write_config(config: dict[str, Any]) -> dict[str, Any]:
-    ensure_data_dir()
-    clean = DEFAULT_CONFIG.copy()
-    for key in clean:
-        clean[key] = config.get(key, clean[key])
-    clean["cameras"] = normalize_cameras(clean)
-    clean["detection_mode"] = str(clean.get("detection_mode", "yolo")).strip().lower()
-    if clean["detection_mode"] not in {"yolo", "frigate", "interval"}:
-        raise ValueError("detection_mode must be yolo, frigate, or interval")
-    clean["confidence"] = clamp_float(clean["confidence"], 0.01, 1.0, "confidence")
-    clean["verify_interval"] = positive_int(clean["verify_interval"], "verify_interval")
-    clean["alert_cooldown"] = positive_int(clean["alert_cooldown"], "alert_cooldown")
-    clean["frame_skip"] = positive_int(clean["frame_skip"], "frame_skip")
-    clean["yolo_imgsz"] = positive_int(clean["yolo_imgsz"], "yolo_imgsz")
-    clean["loop_sleep"] = max(0.0, float(clean["loop_sleep"]))
-    env_values, _ = env_config_values()
-    for key in SECRET_CONFIG_KEYS:
-        if key in env_values and str(clean.get(key, "")) == str(env_values[key]):
-            clean[key] = ""
-    CONFIG_PATH.write_text(json.dumps(clean, ensure_ascii=False, indent=2), encoding="utf-8")
-    return read_config()
-
-
-def positive_int(value: Any, name: str) -> int:
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be a positive integer") from exc
-    if parsed < 1:
-        raise ValueError(f"{name} must be a positive integer")
-    return parsed
-
-
-def clamp_float(value: Any, min_value: float, max_value: float, name: str) -> float:
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be a number") from exc
-    if parsed < min_value or parsed > max_value:
-        raise ValueError(f"{name} must be between {min_value} and {max_value}")
-    return parsed
-
-
-def require_config(config: dict[str, Any], keys: list[str]) -> None:
-    missing = [key for key in keys if not str(config.get(key, "")).strip()]
-    if missing:
-        raise ValueError(f"Missing required config: {', '.join(missing)}")
-
-
-def camera_snapshot_path(index: int) -> Path:
-    return DATA_DIR / f"camera_{index}.jpg"
-
-
-def get_camera(config: dict[str, Any], index: int) -> dict[str, Any]:
-    cameras = normalize_cameras(config)
-    if index < 0 or index >= len(cameras):
-        raise ValueError("Invalid camera index")
-    return cameras[index]
-
-
-def has_camera_snapshot_source(config: dict[str, Any], camera: dict[str, Any]) -> bool:
-    if str(config.get("go2rtc_url", "")).strip() and str(camera.get("go2rtc_src", "")).strip():
-        return True
-    return bool(str(camera.get("rtsp_url", "")).strip())
-
-
-def set_state(**updates: Any) -> None:
-    with state_lock:
-        status.update(updates)
-
-
-def read_state() -> dict[str, Any]:
-    with state_lock:
-        return status.copy()
-
-
-def cleanup_event_images(max_age_seconds: int = 86400) -> None:
-    ensure_data_dir()
-    cutoff = time.time() - max_age_seconds
-    for path in EVENT_IMAGES_DIR.glob("*.jpg"):
-        try:
-            if path.stat().st_mtime < cutoff:
-                path.unlink()
-        except OSError:
-            continue
-
-
-def save_event_image(source_path: Path | None, status_name: str) -> str:
-    if not source_path or not source_path.exists():
-        return ""
-    cleanup_event_images()
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
-    safe_status = "".join(ch for ch in status_name if ch.isalnum() or ch in ("_", "-")) or "event"
-    target = EVENT_IMAGES_DIR / f"{stamp}_{safe_status}.jpg"
-    shutil.copyfile(source_path, target)
-    return target.name
-
-
-def add_event(status_name: str, image_path: Path | None = None, **fields: Any) -> None:
-    ensure_data_dir()
-    image_file = save_event_image(image_path, status_name)
-    event = {"time": now_iso(), "time_local": local_iso(), "status": status_name, **fields}
-    if image_file:
-        event["image_file"] = image_file
-    with EVENTS_PATH.open("a", encoding="utf-8") as file:
-        file.write(json.dumps(event, ensure_ascii=False) + "\n")
-
-
-def read_events(limit: int = 100) -> list[dict[str, Any]]:
-    if not EVENTS_PATH.exists():
-        return []
-    lines = EVENTS_PATH.read_text(encoding="utf-8", errors="replace").splitlines()[-limit:]
-    events: list[dict[str, Any]] = []
-    for line in lines:
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(event, dict):
-            image_file = str(event.get("image_file", "")).strip()
-            if image_file and (EVENT_IMAGES_DIR / image_file).exists():
-                event["image_url"] = f"/api/event-image/{image_file}"
-            events.append(event)
-    return list(reversed(events))
-
-
-def image_to_data_url(path: Path) -> str:
-    encoded = base64.b64encode(path.read_bytes()).decode("utf-8")
-    return f"data:image/jpeg;base64,{encoded}"
-
-
-def chat_url(config: dict[str, Any]) -> str:
-    base_url = str(config["ai_base_url"]).rstrip("/")
-    if base_url.endswith("/chat/completions"):
-        return base_url
-    return f"{base_url}/chat/completions"
-
-
-def parse_ai_content(data: dict[str, Any]) -> str:
-    try:
-        content = data["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError) as exc:
-        raise ValueError("invalid AI API response") from exc
-    if isinstance(content, list):
-        parts = [part.get("text", "") for part in content if isinstance(part, dict)]
-        content = "\n".join(part for part in parts if part)
-    return str(content).strip()
-
-
-def parse_ai_sse(text: str) -> str:
-    parts: list[str] = []
-    for line in text.splitlines():
-        line = line.strip()
-        if not line.startswith("data:"):
-            continue
-        payload = line[5:].strip()
-        if not payload or payload == "[DONE]":
-            continue
-        try:
-            data = json.loads(payload)
-        except json.JSONDecodeError:
-            continue
-        collect_choice_text(data, parts)
-    result = "".join(parts).strip()
-    if not result:
-        raise ValueError("AI API returned SSE response without text content")
-    return result
-
-
-def collect_choice_text(data: dict[str, Any], parts: list[str]) -> None:
-    for choice in data.get("choices", []):
-        if not isinstance(choice, dict):
-            continue
-        message = choice.get("message")
-        if isinstance(message, dict) and message.get("content"):
-            parts.append(str(message["content"]))
-            continue
-        delta = choice.get("delta")
-        if isinstance(delta, dict) and delta.get("content"):
-            parts.append(str(delta["content"]))
-            continue
-        text = choice.get("text")
-        if text:
-            parts.append(str(text))
-
-
-def parse_concatenated_json(text: str) -> str:
-    decoder = json.JSONDecoder()
-    index = 0
-    parts: list[str] = []
-    while index < len(text):
-        while index < len(text) and text[index].isspace():
-            index += 1
-        if index >= len(text):
-            break
-        data, end = decoder.raw_decode(text, index)
-        if isinstance(data, dict):
-            collect_choice_text(data, parts)
-        index = end
-    result = "".join(parts).strip()
-    if not result:
-        raise ValueError("AI API returned JSON without text content")
-    return result
-
-
-def response_ai_content(response: requests.Response) -> str:
-    text = response.text
-    content_type = response.headers.get("content-type", "").lower()
-    if "text/event-stream" in content_type or text.lstrip().startswith("data:"):
-        return parse_ai_sse(text)
-    try:
-        return parse_ai_content(response.json())
-    except ValueError:
-        return parse_concatenated_json(text)
-
-
-def normalize_ai_result(content: str) -> str:
-    upper = content.upper()
-    if "EMERGENCY" in upper:
-        return "EMERGENCY"
-    if "SAFE" in upper:
-        return "SAFE"
-    return "SAFE"
-
-
-def short_text(value: str, limit: int = 20) -> str:
-    value = " ".join(str(value).split())
-    return value[:limit]
-
-
-def parse_ai_verdict(content: str) -> tuple[str, str, str]:
-    lines = [line.strip() for line in str(content).splitlines() if line.strip()]
-    result = ""
-    description = ""
-
-    if lines:
-        first = lines[0].upper()
-        if first == "EMERGENCY" or first.startswith("EMERGENCY"):
-            result = "EMERGENCY"
-        elif first == "SAFE" or first.startswith("SAFE"):
-            result = "SAFE"
-
-    if not result:
-        result = normalize_ai_result(content)
-
-    for line in lines[1:]:
-        cleaned = line
-        for prefix in ("DESC:", "DESCRIPTION:", "MÔ TẢ:", "MO TA:", "-", "2."):
-            if cleaned.upper().startswith(prefix):
-                cleaned = cleaned[len(prefix):].strip()
-        if cleaned.upper() not in {"SAFE", "EMERGENCY"}:
-            description = cleaned
-            break
-
-    if not description:
-        for line in lines:
-            if line.upper() not in {"SAFE", "EMERGENCY"}:
-                description = line
-                break
-
-    if not description:
-        description = result
-
-    return result, short_text(description), str(content).strip()
-
-
-def verify_scene(image_path: Path, config: dict[str, Any]) -> tuple[str, str, str]:
-    require_config(config, ["ai_api_key", "ai_base_url", "vision_model", "verify_prompt"])
-    payload = {
-        "model": config["vision_model"],
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": str(config["verify_prompt"])},
-                    {"type": "image_url", "image_url": {"url": image_to_data_url(image_path)}},
-                ],
-            }
-        ],
-        "max_tokens": 20,
-        "stream": False,
-    }
-    headers = {
-        "Authorization": f"Bearer {config['ai_api_key']}",
-        "Content-Type": "application/json",
-    }
-    logger.info("[AI] verifying scene")
-    response = requests.post(chat_url(config), headers=headers, json=payload, timeout=120)
-    response.raise_for_status()
-    content = response_ai_content(response)
-    result, description, raw = parse_ai_verdict(content)
-    logger.info("[AI] result=%s description=%r raw=%r", result, description, raw[:200])
-    return result, description, raw
-
-
-def send_telegram(photo_path: Path, message: str, config: dict[str, Any]) -> None:
-    require_config(config, ["telegram_bot_token", "telegram_chat_id"])
-    url = f"https://api.telegram.org/bot{config['telegram_bot_token']}/sendPhoto"
-    with photo_path.open("rb") as photo:
-        response = requests.post(
-            url,
-            data={"chat_id": config["telegram_chat_id"], "caption": message},
-            files={"photo": photo},
-            timeout=60,
-        )
-    response.raise_for_status()
-
-
-def process_camera_verification(
-    config: dict[str, Any],
-    index: int,
-    image_path: Path,
-    confidence: float,
-    last_alert: dict[int | str, float],
-    alert_key: int | str,
-    event_source: str = "verified",
-) -> dict[str, Any]:
-    camera = get_camera(config, index)
-    camera_name = str(camera["name"])
-    ai_result = "SAFE"
-    ai_description = ""
-    raw = ""
-    try:
-        ai_result, ai_description, raw = verify_scene(image_path, config)
-        set_state(last_ai_result=ai_result, last_verify_at=now_iso(), last_error="", last_camera=camera_name)
-        add_event(
-            event_source,
-            image_path=image_path,
-            camera=camera_name,
-            confidence=confidence,
-            ai_result=ai_result,
-            ai_raw=ai_description,
-            ai_response=raw,
-            message=ai_description,
-        )
+        if monitor.start_monitor(current_config) == "started":
+            logger.info("Auto-started YOLO monitor on boot.")
     except Exception as exc:
-        set_state(last_error=str(exc), last_verify_at=now_iso(), last_camera=camera_name)
-        add_event("ai_error", image_path=image_path, camera=camera_name, confidence=confidence, error=str(exc))
-        return {"success": False, "camera": camera_name, "error": str(exc), "result": ai_result}
-
-    if ai_result == "EMERGENCY":
-        now = time.time()
-        if now - last_alert.get(alert_key, 0.0) > float(config["alert_cooldown"]):
-            try:
-                send_telegram(
-                    image_path,
-                    f"AI phat hien nguoi co the bi te nga hoac gap nguy hiem!\nCamera: {camera_name}",
-                    config,
-                )
-                last_alert[alert_key] = now
-                set_state(last_alert_at=now_iso())
-                add_event("telegram_sent", image_path=image_path, camera=camera_name, confidence=confidence, ai_result=ai_result)
-            except Exception as exc:
-                set_state(last_error=str(exc), last_camera=camera_name)
-                add_event("telegram_error", image_path=image_path, camera=camera_name, confidence=confidence, error=str(exc))
-        else:
-            add_event("cooldown", image_path=image_path, camera=camera_name, confidence=confidence, ai_result=ai_result)
-
-    return {
-        "success": True,
-        "camera": camera_name,
-        "result": ai_result,
-        "description": ai_description,
-        "raw": raw,
-    }
+        logger.error("Could not auto-start monitor: %s", exc)
+        
+    yield
+    # Shutdown
+    monitor.stop_monitor(wait=True)
 
 
-def capture_rtsp_snapshot(rtsp_url: str, output_path: Path) -> Path:
-    import cv2
+app = FastAPI(title="Fall Detection Web", lifespan=lifespan)
 
-    if not rtsp_url:
-        raise ValueError("Camera RTSP URL is empty")
-    cap = cv2.VideoCapture(rtsp_url)
-    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-    try:
-        ok, frame = cap.read()
-        if not ok:
-            raise RuntimeError("Could not read frame from RTSP source")
-        ensure_data_dir()
-        cv2.imwrite(str(output_path), frame)
-    finally:
-        cap.release()
-    return output_path
+# Mount static files
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+db.EVENT_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/api/event-image", StaticFiles(directory=str(db.EVENT_IMAGES_DIR)), name="event-image")
 
+# ──────────────────────────────────────────────
+# UI Routes
+# ──────────────────────────────────────────────
 
-def capture_snapshot(config: dict[str, Any], output_path: Path = SNAPSHOT_PATH) -> Path:
-    require_config(config, ["rtsp_url"])
-    return capture_rtsp_snapshot(str(config["rtsp_url"]), output_path)
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    return templates.TemplateResponse("login.html", {"request": request})
 
-
-def capture_go2rtc_snapshot(config: dict[str, Any], camera: dict[str, Any], output_path: Path) -> Path:
-    base_url = str(config.get("go2rtc_url", "")).strip().rstrip("/")
-    src = str(camera.get("go2rtc_src", "")).strip()
-    if not base_url or not src:
-        raise ValueError("go2rtc URL or camera src is empty")
-
-    logger.info("[SNAPSHOT] go2rtc src=%s", src)
-    response = requests.get(
-        f"{base_url}/api/frame.jpeg",
-        params={"src": src},
-        timeout=10,
+@app.post("/auth/login")
+async def login(
+    request: Request,
+    response: Response,
+    username: str = Form(...),
+    password: str = Form(...),
+):
+    user = db.get_user(username)
+    if not user or not auth.verify_password(password, str(user["password_hash"])):
+        return templates.TemplateResponse(
+            "login.html",
+            {"request": request, "error": "Sai tài khoản hoặc mật khẩu.", "username": username},
+            status_code=status.HTTP_401_UNAUTHORIZED,
+        )
+    token = auth.create_token(username)
+    response = RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
+    response.set_cookie(
+        key="session",
+        value=token,
+        httponly=True,
+        max_age=8 * 3600,
+        samesite="lax",
     )
-    response.raise_for_status()
-    if not response.content:
-        raise ValueError("go2rtc returned empty snapshot")
+    return response
 
-    ensure_data_dir()
-    output_path.write_bytes(response.content)
-    return output_path
-
-
-def capture_camera_snapshot(config: dict[str, Any], index: int) -> Path:
-    camera = get_camera(config, index)
-    output_path = camera_snapshot_path(index)
-    if str(config.get("go2rtc_url", "")).strip() and str(camera.get("go2rtc_src", "")).strip():
-        try:
-            return capture_go2rtc_snapshot(config, camera, output_path)
-        except (requests.RequestException, ValueError) as exc:
-            if not str(camera.get("rtsp_url", "")).strip():
-                raise
-            logger.warning("[SNAPSHOT] go2rtc failed, falling back to RTSP: %s", exc)
-
-    return capture_rtsp_snapshot(str(camera.get("rtsp_url", "")).strip(), output_path)
-
-
-def mjpeg_frames(rtsp_url: str):
-    import cv2
-
-    cap = cv2.VideoCapture(rtsp_url)
-    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-    try:
-      while True:
-          ok, frame = cap.read()
-          if not ok:
-              time.sleep(0.5)
-              continue
-          ok, encoded = cv2.imencode(".jpg", frame)
-          if not ok:
-              continue
-          yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + encoded.tobytes() + b"\r\n"
-          time.sleep(0.08)
-    finally:
-        cap.release()
-
-
-def capture_latest_frames(index: int, camera: dict[str, Any], holder: dict[str, Any], lock: threading.Lock) -> None:
-    import cv2
-
-    camera_name = str(camera["name"])
-    rtsp_url = str(camera["rtsp_url"])
-    cap = cv2.VideoCapture(rtsp_url)
-    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-    last_reconnect_event = 0.0
-
-    try:
-        while not stop_event.is_set():
-            ok, frame = cap.read()
-            if not ok:
-                now = time.time()
-                if now - last_reconnect_event > 30:
-                    logger.warning("[RTSP] reconnect stream camera=%s", camera_name)
-                    set_state(last_error=f"RTSP read failed for {camera_name}, reconnecting", last_camera=camera_name)
-                    add_event("rtsp_reconnect", camera=camera_name, message="RTSP read failed")
-                    last_reconnect_event = now
-                cap.release()
-                time.sleep(0.5)
-                cap = cv2.VideoCapture(rtsp_url)
-                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                continue
-
-            with lock:
-                holder["frame"] = frame
-                holder["time"] = time.time()
-                holder["seq"] = int(holder.get("seq", 0)) + 1
-    finally:
-        cap.release()
-
-
-def monitor_loop(config: dict[str, Any]) -> None:
-    detection_mode = str(config.get("detection_mode", "yolo")).lower()
-    all_cameras = [camera for camera in normalize_cameras(config) if camera.get("enabled")]
-    if detection_mode == "frigate":
-        cameras = [camera for camera in all_cameras if has_camera_snapshot_source(config, camera)]
-    else:
-        cameras = [camera for camera in all_cameras if camera.get("rtsp_url")]
-    if not cameras:
-        raise ValueError("No enabled cameras")
-    if detection_mode == "frigate":
-        logger.info("[MONITOR] Frigate/OpenVINO trigger mode ready")
-        set_state(running=True, started_at=now_iso(), last_error="", mode=detection_mode)
-        add_event("started", message="Frigate/OpenVINO trigger mode ready")
-        try:
-            while not stop_event.is_set():
-                time.sleep(0.5)
-        finally:
-            set_state(running=False)
-            add_event("stopped", message="Monitor stopped")
-        return
-
-    import cv2
-
-    model = None
-    if detection_mode == "yolo":
-        from ultralytics import YOLO
-
-        if str(config.get("detection_mode", "yolo")).lower() == "yolo":
-            require_config(config, ["yolo_model"])
-        logger.info("[MONITOR] loading YOLO model=%s imgsz=%s", config["yolo_model"], config["yolo_imgsz"])
-        model = YOLO(config["yolo_model"])
-    else:
-        logger.info("[MONITOR] running without YOLO; AI interval mode enabled")
-    frame_holders: list[dict[str, Any]] = [{"frame": None, "time": 0.0, "seq": 0} for _ in cameras]
-    frame_locks = [threading.Lock() for _ in cameras]
-    capture_threads = [
-        threading.Thread(
-            target=capture_latest_frames,
-            args=(index, camera, frame_holders[index], frame_locks[index]),
-            daemon=True,
-        )
-        for index, camera in enumerate(cameras)
-    ]
-    frame_counts = [0 for _ in cameras]
-    last_seen_seq = [0 for _ in cameras]
-    last_verify = [0.0 for _ in cameras]
-    last_alert: dict[int | str, float] = {index: 0.0 for index in range(len(cameras))}
-    total_frames = 0
-    set_state(running=True, started_at=now_iso(), last_error="", mode=detection_mode)
-    for thread in capture_threads:
-        thread.start()
-    add_event("started", message=f"Monitor started for {len(cameras)} camera(s), mode={detection_mode}")
-
-    try:
-        while not stop_event.is_set():
-            for index, camera in enumerate(cameras):
-                camera_name = str(camera["name"])
-                with frame_locks[index]:
-                    frame = frame_holders[index]["frame"]
-                    seq = int(frame_holders[index].get("seq", 0))
-
-                if frame is None or seq == last_seen_seq[index]:
-                    continue
-
-                last_seen_seq[index] = seq
-                frame_counts[index] += 1
-                total_frames += 1
-                set_state(frames=total_frames, last_camera=camera_name)
-                if frame_counts[index] % int(config["frame_skip"]) != 0:
-                    continue
-
-                now = time.time()
-                person_detected = detection_mode == "interval" and (now - last_verify[index] > float(config["verify_interval"]))
-                best_confidence = 0.0
-                if detection_mode == "yolo" and model is not None:
-                    results = model.predict(
-                        frame,
-                        verbose=False,
-                        conf=float(config["confidence"]),
-                        imgsz=int(config["yolo_imgsz"]),
-                        classes=[0],
-                    )
-                    for result in results:
-                        for box in result.boxes:
-                            if int(box.cls[0]) == 0:
-                                person_detected = True
-                                best_confidence = max(best_confidence, float(box.conf[0]))
-
-                if person_detected:
-                    set_state(last_person_confidence=best_confidence, last_error="", last_camera=camera_name)
-                    if detection_mode == "yolo":
-                        logger.info("[PERSON] camera=%s confidence=%.2f", camera_name, best_confidence)
-                    else:
-                        logger.info("[VERIFY] camera=%s interval mode", camera_name)
-                    if now - last_verify[index] > float(config["verify_interval"]):
-                        ensure_data_dir()
-                        verify_path = camera_snapshot_path(index)
-                        cv2.imwrite(str(verify_path), frame)
-                        cv2.imwrite(str(SNAPSHOT_PATH), frame)
-                        try:
-                            ai_result, ai_description, raw = verify_scene(verify_path, config)
-                            last_verify[index] = now
-                            set_state(last_ai_result=ai_result, last_verify_at=now_iso(), last_error="")
-                            add_event(
-                                "verified",
-                                image_path=verify_path,
-                                camera=camera_name,
-                                confidence=best_confidence,
-                                ai_result=ai_result,
-                                ai_raw=ai_description,
-                                ai_response=raw,
-                                message=ai_description,
-                            )
-                        except Exception as exc:
-                            last_verify[index] = now
-                            set_state(last_error=str(exc), last_verify_at=now_iso())
-                            add_event("ai_error", image_path=verify_path, camera=camera_name, confidence=best_confidence, error=str(exc))
-                            ai_result = "SAFE"
-
-                        if ai_result == "EMERGENCY":
-                            if now - last_alert[index] > float(config["alert_cooldown"]):
-                                try:
-                                    send_telegram(
-                                        verify_path,
-                                        f"⚠️ AI phát hiện người có thể bị té ngã hoặc gặp nguy hiểm!\nCamera: {camera_name}",
-                                        config,
-                                    )
-                                    last_alert[index] = now
-                                    set_state(last_alert_at=now_iso())
-                                    add_event("telegram_sent", image_path=verify_path, camera=camera_name, confidence=best_confidence, ai_result=ai_result)
-                                except Exception as exc:
-                                    set_state(last_error=str(exc))
-                                    add_event("telegram_error", image_path=verify_path, camera=camera_name, confidence=best_confidence, error=str(exc))
-                            else:
-                                add_event("cooldown", image_path=verify_path, camera=camera_name, confidence=best_confidence, ai_result=ai_result)
-
-            time.sleep(float(config["loop_sleep"]))
-    except Exception as exc:
-        logger.exception("[MONITOR] failed")
-        set_state(last_error=str(exc))
-        add_event("monitor_error", error=str(exc))
-    finally:
-        stop_event.set()
-        for thread in capture_threads:
-            thread.join(timeout=2)
-        set_state(running=False)
-        add_event("stopped", message="Monitor stopped")
-
-
-def start_monitor(config: dict[str, Any]) -> str:
-    global worker_thread
-    with monitor_lock:
-        if worker_thread and worker_thread.is_alive():
-            return "already running"
-        stop_event.clear()
-        worker_thread = threading.Thread(target=monitor_loop, args=(config,), daemon=True)
-        worker_thread.start()
-        return "started"
-
-
-def stop_monitor(wait: bool = False) -> None:
-    stop_event.set()
-    thread = worker_thread
-    if wait and thread and thread.is_alive():
-        thread.join(timeout=5)
-
-
-def restart_monitor(config: dict[str, Any]) -> None:
-    with monitor_lock:
-        thread = worker_thread
-        if not thread or not thread.is_alive():
-            return
-        stop_event.set()
-        thread.join(timeout=5)
-        stop_event.clear()
-        new_thread = threading.Thread(target=monitor_loop, args=(config,), daemon=True)
-        globals()["worker_thread"] = new_thread
-        new_thread.start()
-        add_event("config_applied", message="Monitor restarted with new settings")
-
-
-def find_camera_index(config: dict[str, Any], camera_name: str, fallback_index: int | None = None) -> int:
-    cameras = normalize_cameras(config)
-    if fallback_index is not None and 0 <= fallback_index < len(cameras):
-        return fallback_index
-    needle = camera_name.strip().lower()
-    for index, camera in enumerate(cameras):
-        names = {
-            str(camera.get("name", "")).strip().lower(),
-            str(camera.get("go2rtc_src", "")).strip().lower(),
-        }
-        if needle and needle in names:
-            return index
-    if len(cameras) == 1:
-        return 0
-    raise ValueError("Cannot map Frigate camera to configured camera")
-
-
-def parse_frigate_payload(payload: dict[str, Any], config: dict[str, Any]) -> tuple[int, float, str]:
-    event = payload.get("after") if isinstance(payload.get("after"), dict) else payload
-    label = str(event.get("label", payload.get("label", ""))).strip().lower()
-    if label and label != "person":
-        raise ValueError(f"Ignored non-person Frigate event: {label}")
-    camera_name = str(event.get("camera", payload.get("camera", ""))).strip()
-    raw_index = payload.get("index", event.get("index"))
-    fallback_index = int(raw_index) if isinstance(raw_index, int) or str(raw_index).isdigit() else None
-    score = event.get("top_score", event.get("score", payload.get("score", payload.get("confidence", 0.0))))
-    try:
-        confidence = float(score)
-    except (TypeError, ValueError):
-        confidence = 0.0
-    index = find_camera_index(config, camera_name, fallback_index)
-    return index, confidence, camera_name
-
+@app.post("/auth/logout")
+async def logout():
+    response = RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+    response.delete_cookie("session")
+    return response
 
 @app.get("/", response_class=HTMLResponse)
-def index() -> HTMLResponse:
-    return HTMLResponse(INDEX_HTML)
+async def index_page(request: Request, _: str = Depends(auth.require_auth)):
+    return templates.TemplateResponse("index.html", {"request": request})
 
+
+# ──────────────────────────────────────────────
+# API Routes
+# ──────────────────────────────────────────────
 
 @app.get("/api/config")
-def api_config() -> JSONResponse:
-    _, sources = env_config_values()
-    return JSONResponse({"success": True, "config": read_config(), "env_sources": sources})
-
+async def get_config(_: str = Depends(auth.require_auth)):
+    return {"success": True, "config": config.read_config()}
 
 @app.post("/api/config")
-async def api_save_config(request: Request) -> JSONResponse:
+async def save_config(new_config: dict[str, Any] = Body(...), _: str = Depends(auth.require_auth)):
     try:
-        body = await request.json()
-        if not isinstance(body, dict):
-            raise ValueError("Invalid config payload")
-        was_running = bool(read_state().get("running"))
-        config = write_config(body)
-        if was_running:
-            restart_monitor(config)
-        message = "saved and applied" if was_running else "saved"
-        return JSONResponse({"success": True, "config": config, "message": message})
-    except (json.JSONDecodeError, ValueError) as exc:
-        return JSONResponse({"success": False, "error": str(exc)}, status_code=400)
-
+        updated = config.write_config(new_config)
+        monitor.restart_monitor(updated)
+        return {"success": True, "config": updated, "message": "Settings saved and monitor restarted"}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 @app.get("/api/status")
-def api_status() -> JSONResponse:
-    return JSONResponse({"success": True, "status": read_state()})
-
+async def get_status(_: str = Depends(auth.require_auth)):
+    return {
+        "success": True,
+        "status": monitor.read_state(),
+        "event_count": db.count_events(),
+    }
 
 @app.post("/api/start")
-def api_start() -> JSONResponse:
+async def api_start_monitor(_: str = Depends(auth.require_auth)):
     try:
-        config = read_config()
-        detection_mode = str(config.get("detection_mode", "yolo")).lower()
-        enabled_cameras = [camera for camera in normalize_cameras(config) if camera.get("enabled")]
-        if detection_mode == "frigate":
-            has_source = any(has_camera_snapshot_source(config, camera) for camera in enabled_cameras)
-        else:
-            has_source = any(camera.get("rtsp_url") for camera in enabled_cameras)
-        if not has_source:
-            raise ValueError("No enabled cameras")
-        if detection_mode == "yolo":
-            require_config(config, ["yolo_model"])
-    except ValueError as exc:
-        return JSONResponse({"success": False, "error": str(exc)}, status_code=400)
-    message = start_monitor(config)
-    return JSONResponse({"success": True, "message": message})
-
+        result = monitor.start_monitor(config.read_config())
+        return {"success": True, "message": f"Monitor {result}"}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 @app.post("/api/stop")
-def api_stop() -> JSONResponse:
-    stop_monitor()
-    return JSONResponse({"success": True, "message": "stopping"})
-
-
-@app.post("/api/capture")
-def api_capture() -> JSONResponse:
-    try:
-        config = read_config()
-        cameras = normalize_cameras(config)
-        path = capture_camera_snapshot(config, 0) if cameras else capture_snapshot(config)
-        add_event("snapshot", image_path=path, message=f"Captured {path.name}")
-        return JSONResponse({"success": True, "message": "snapshot captured"})
-    except Exception as exc:
-        add_event("snapshot_error", error=str(exc))
-        return JSONResponse({"success": False, "error": str(exc)}, status_code=500)
-
-
-@app.get("/api/snapshot")
-def api_snapshot() -> Response:
-    if not SNAPSHOT_PATH.exists():
-        return Response(status_code=204)
-    return Response(SNAPSHOT_PATH.read_bytes(), media_type="image/jpeg")
-
-
-@app.get("/api/camera/snapshot")
-def api_camera_snapshot(index: int = 0) -> Response:
-    try:
-        path = capture_camera_snapshot(read_config(), index)
-    except Exception as exc:
-        return JSONResponse({"success": False, "error": str(exc)}, status_code=500)
-    return Response(path.read_bytes(), media_type="image/jpeg")
-
-
-@app.get("/api/camera/video")
-def api_camera_video(index: int = 0) -> StreamingResponse:
-    try:
-        camera = get_camera(read_config(), index)
-        rtsp_url = str(camera.get("rtsp_url", "")).strip()
-        if not rtsp_url:
-            raise ValueError("Camera RTSP URL is empty")
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return StreamingResponse(
-        mjpeg_frames(rtsp_url),
-        media_type="multipart/x-mixed-replace; boundary=frame",
-    )
-
+async def api_stop_monitor(_: str = Depends(auth.require_auth)):
+    monitor.stop_monitor()
+    return {"success": True, "message": "Monitor stopped"}
 
 @app.get("/api/events")
-def api_events() -> JSONResponse:
-    return JSONResponse({"success": True, "events": read_events()})
+async def get_events(_: str = Depends(auth.require_auth)):
+    return {"success": True, "events": db.get_events()}
 
+@app.delete("/api/events")
+async def clear_events(_: str = Depends(auth.require_auth)):
+    deleted = db.clear_events()
+    return {"success": True, "message": f"Deleted {deleted} events"}
 
-@app.get("/api/event-image/{image_file}")
-def api_event_image(image_file: str) -> Response:
-    safe_name = Path(image_file).name
-    path = EVENT_IMAGES_DIR / safe_name
-    if not path.exists() or not path.is_file():
-        raise HTTPException(status_code=404, detail="Event image not found")
-    return Response(path.read_bytes(), media_type="image/jpeg")
+@app.post("/api/capture")
+async def capture(_: str = Depends(auth.require_auth)):
+    try:
+        c = config.read_config()
+        monitor.capture_snapshot(c)
+        return {"success": True, "message": "Captured snapshot"}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
+@app.get("/api/camera/snapshot")
+async def get_camera_snapshot(index: int, _: str = Depends(auth.require_auth)):
+    try:
+        c = config.read_config()
+        path = monitor.capture_camera_snapshot(c, index)
+        return Response(content=path.read_bytes(), media_type="image/jpeg")
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+@app.get("/api/camera/video")
+async def get_camera_video(index: int, _: str = Depends(auth.require_auth)):
+    try:
+        c = config.read_config()
+        camera = config.get_camera(c, index)
+        rtsp_url = str(camera.get("rtsp_url", "")).strip()
+        if not rtsp_url:
+            raise ValueError("No RTSP URL configured for this camera")
+        from fastapi.responses import StreamingResponse
+        return StreamingResponse(
+            monitor.mjpeg_frames(rtsp_url),
+            media_type="multipart/x-mixed-replace; boundary=frame"
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 @app.post("/api/test-ai")
-def api_test_ai() -> JSONResponse:
-    if not SNAPSHOT_PATH.exists():
-        return JSONResponse({"success": False, "error": "No snapshot. Capture first."}, status_code=400)
+async def test_ai(_: str = Depends(auth.require_auth)):
     try:
-        result, ai_description, raw = verify_scene(SNAPSHOT_PATH, read_config())
-        add_event("test_ai", image_path=SNAPSHOT_PATH, ai_result=result, ai_raw=ai_description, ai_response=raw, message=ai_description)
-        return JSONResponse({"success": True, "result": result, "description": ai_description, "raw": raw})
+        c = config.read_config()
+        path = monitor.SNAPSHOT_PATH
+        if not path.exists():
+            monitor.capture_snapshot(c, path)
+        result, desc, raw = ai.verify_scene(path, c)
+        return {"success": True, "result": result, "description": desc, "raw": raw}
     except Exception as exc:
-        add_event("test_ai_error", error=str(exc))
-        return JSONResponse({"success": False, "error": str(exc)}, status_code=500)
-
+        raise HTTPException(status_code=400, detail=str(exc))
 
 @app.post("/api/test-ai-camera")
-def api_test_ai_camera(index: int = 0) -> JSONResponse:
+async def test_ai_camera(index: int, _: str = Depends(auth.require_auth)):
     try:
-        config = read_config()
-        path = capture_camera_snapshot(config, index)
-        result, ai_description, raw = verify_scene(path, config)
-        camera = get_camera(config, index)
-        add_event("test_ai_camera", image_path=path, camera=camera["name"], ai_result=result, ai_raw=ai_description, ai_response=raw, message=ai_description)
-        return JSONResponse({"success": True, "camera": camera["name"], "result": result, "description": ai_description, "raw": raw})
+        c = config.read_config()
+        path = monitor.capture_camera_snapshot(c, index)
+        result, desc, raw = ai.verify_scene(path, c)
+        camera_name = str(config.get_camera(c, index).get("name", f"Camera {index}"))
+        return {"success": True, "camera": camera_name, "result": result, "description": desc, "raw": raw}
     except Exception as exc:
-        add_event("test_ai_camera_error", error=str(exc))
-        return JSONResponse({"success": False, "error": str(exc)}, status_code=500)
-
-
-@app.post("/analyze")
-@app.post("/verify")
-@app.post("/api/frigate-trigger")
-async def api_frigate_trigger(request: Request) -> JSONResponse:
-    try:
-        payload = await request.json()
-        if not isinstance(payload, dict):
-            raise ValueError("Invalid Frigate payload")
-        config = read_config()
-        if str(config.get("detection_mode", "yolo")).lower() != "frigate":
-            raise ValueError("Detection Mode must be frigate to accept Frigate triggers")
-        index, confidence, source_camera = parse_frigate_payload(payload, config)
-        camera = get_camera(config, index)
-        camera_name = str(camera["name"])
-        now = time.time()
-        with frigate_lock:
-            last_seen = frigate_last_verify.get(camera_name, 0.0)
-            if now - last_seen <= float(config["verify_interval"]):
-                add_event("frigate_cooldown", camera=camera_name, confidence=confidence, message="Verify interval cooldown")
-                return JSONResponse({"success": True, "message": "verify interval cooldown", "camera": camera_name})
-            frigate_last_verify[camera_name] = now
-
-        logger.info("[FRIGATE] person trigger camera=%s confidence=%.2f", source_camera or camera_name, confidence)
-        set_state(last_person_confidence=confidence, last_error="", last_camera=camera_name, mode="frigate")
-        path = capture_camera_snapshot(config, index)
-        shutil.copyfile(path, SNAPSHOT_PATH)
-        result = process_camera_verification(config, index, path, confidence, frigate_last_alert, camera_name, "frigate_verified")
-        return JSONResponse(result, status_code=200 if result.get("success") else 500)
-    except ValueError as exc:
-        add_event("frigate_trigger_ignored", error=str(exc))
-        return JSONResponse({"success": False, "error": str(exc)}, status_code=400)
-    except Exception as exc:
-        add_event("frigate_trigger_error", error=str(exc))
-        return JSONResponse({"success": False, "error": str(exc)}, status_code=500)
-
-
-@app.post("/api/test-ai-upload")
-async def api_test_ai_upload(file: UploadFile = File(...)) -> JSONResponse:
-    ensure_data_dir()
-    path = DATA_DIR / "upload_test.jpg"
-    content = await file.read()
-    if not content:
-        raise HTTPException(status_code=400, detail="Empty upload")
-    path.write_bytes(content)
-    try:
-        result, ai_description, raw = verify_scene(path, read_config())
-        add_event("test_ai_upload", image_path=path, ai_result=result, ai_raw=ai_description, ai_response=raw, message=ai_description)
-        return JSONResponse({"success": True, "result": result, "description": ai_description, "raw": raw})
-    except Exception as exc:
-        add_event("test_ai_upload_error", error=str(exc))
-        return JSONResponse({"success": False, "error": str(exc)}, status_code=500)
-
+        raise HTTPException(status_code=400, detail=str(exc))
 
 @app.post("/api/test-telegram")
-def api_test_telegram() -> JSONResponse:
+async def test_telegram(_: str = Depends(auth.require_auth)):
     try:
-        if not SNAPSHOT_PATH.exists():
-            capture_snapshot(read_config())
-        send_telegram(SNAPSHOT_PATH, "Fall Detection test alert", read_config())
-        add_event("test_telegram", message="Telegram test sent")
-        return JSONResponse({"success": True, "message": "Telegram test sent"})
+        c = config.read_config()
+        path = monitor.SNAPSHOT_PATH
+        if not path.exists():
+            monitor.capture_snapshot(c, path)
+        ai.send_telegram(path, "🔧 Test notification from Fall Detection Web", c)
+        return {"success": True, "message": "Telegram message sent"}
     except Exception as exc:
-        add_event("test_telegram_error", error=str(exc))
-        return JSONResponse({"success": False, "error": str(exc)}, status_code=500)
+        raise HTTPException(status_code=400, detail=str(exc))
+
+@app.post("/api/test-ai-upload")
+async def test_ai_upload(request: Request, _: str = Depends(auth.require_auth)):
+    try:
+        form = await request.form()
+        upload = form.get("file")
+        if not hasattr(upload, "read"):
+            raise ValueError("No file uploaded")
+        content = await upload.read()
+        if len(content) > 10 * 1024 * 1024:
+            raise ValueError("File exceeds 10MB limit")
+        
+        test_path = DATA_DIR / "upload_test.jpg"
+        test_path.write_bytes(content)
+        
+        c = config.read_config()
+        result, desc, raw = ai.verify_scene(test_path, c)
+        return {"success": True, "result": result, "description": desc, "raw": raw}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))

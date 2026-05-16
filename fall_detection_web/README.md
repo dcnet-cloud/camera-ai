@@ -1,229 +1,186 @@
 # Fall Detection Web
 
-Web UI nhẹ để chạy script fall detection:
+Web UI giám sát té ngã chạy trên VPS/server:
 
 ```text
-Frigate/OpenVINO person detection
--> webhook /analyze hoặc /verify
--> snapshot mới nhất từ go2rtc JPEG
--> AI vision verification
--> Telegram alert
+Camera (RTSP)
+  → go2rtc (stream & JPEG snapshot)
+  → YOLO detect person (local, trên Python app)
+  → AI vision verify (cloud API)
+  → Telegram alert nếu EMERGENCY
 ```
 
-Ứng dụng này tách riêng khỏi addon `simple_ai_vision`. Mode mặc định là Frigate/OpenVINO trigger: Frigate chạy object detection, còn Python app chỉ nhận webhook, lấy snapshot, gọi AI và gửi Telegram.
+## Tính Năng
 
-## Lỗi Đã Fix
+- **YOLO prefilter** — dùng `ultralytics` + `opencv-python` để detect `person` từ RTSP stream. Khi phát hiện, gọi AI cloud để xác minh té ngã.
+- **AI Verify** — gửi ảnh lên OpenAI-compatible vision API, parse response `SAFE / EMERGENCY`.
+- **Telegram Alert** — gửi ảnh kèm caption khi AI kết luận EMERGENCY, có cooldown để tránh spam.
+- **Multi-camera** — cấu hình nhiều camera, bật/tắt từng camera qua UI.
+- **Đăng nhập bảo mật** — HTTP-only JWT cookie, mật khẩu hash bằng bcrypt.
+- **SQLite storage** — events và settings đều lưu trong `data/fall_detection.db`.
+- **Live view** — xem stream qua go2rtc iframe (MSE/WebRTC) hoặc Python MJPEG proxy.
+- **Auto-migrate** — tự import `events.jsonl` và `config.json` cũ vào DB khi khởi động lần đầu.
 
-Script cũ dùng:
-
-```python
-result = response.json()
-```
-
-Một số OpenAI-compatible gateway có thể trả:
-
-- JSON chuẩn.
-- SSE dạng `data: {...}`.
-- Nhiều JSON object nối nhau.
-
-Khi gặp nhiều JSON object nối nhau, `response.json()` báo:
+## Cấu Trúc Mã Nguồn
 
 ```text
-Extra data: line 2 column 1
+fall_detection_web/
+├── app.py           # FastAPI routes, lifespan startup/shutdown
+├── auth.py          # bcrypt password + JWT HTTP-only cookie session
+├── config.py        # Đọc/ghi config từ SQLite, override bằng .env
+├── db.py            # SQLite layer: events, users, settings
+├── monitor.py       # YOLO monitor loop + RTSP capture threads
+├── ai.py            # AI verify (vision API) + Telegram sender
+├── requirements.txt
+├── .env.example
+└── templates/
+    ├── index.html   # Toàn bộ frontend (Jinja2)
+    └── login.html   # Trang đăng nhập
 ```
-
-Backend mới xử lý cả ba dạng response:
-
-- `response.json()` cho JSON chuẩn.
-- Parser SSE cho `data: ...`.
-- `json.JSONDecoder().raw_decode()` lặp nhiều lần cho JSON nối nhau.
 
 ## Cài Đặt
 
-### Python app
-
 ```bash
+git clone <repo>
 cd fall_detection_web
 python3 -m venv venv
-. venv/bin/activate
+source venv/bin/activate          # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-mkdir -p data
-cp config.example.json data/config.json
-cp .env.example .env
 uvicorn app:app --host 0.0.0.0 --port 8090
 ```
 
-Mở:
+Mở trình duyệt: `http://<server-ip>:8090`
 
-```text
-http://<server-ip>:8090
-```
-
-### Chạy độc lập trên cùng VPS
-
-Trên cùng một VPS sẽ có 3 service riêng:
-
-```text
-go2rtc
--> cung cấp stream/snapshot camera
-
-Frigate
--> đọc stream từ go2rtc
--> dùng OpenVINO detect person
--> gọi webhook Python app
-
-Fall Detection Web
--> nhận webhook /analyze hoặc /verify
--> lấy snapshot mới từ go2rtc
--> gửi ảnh lên AI cloud xác minh té ngã/nguy hiểm
--> gửi Telegram nếu AI trả EMERGENCY
-```
-
-Python app không tự chạy Frigate. Nếu chọn `Detection Mode = Frigate/OpenVINO trigger`, bạn cần cài và chạy Frigate như một service/container riêng trên VPS đó.
+Đăng nhập mặc định: **admin / admin** (đổi ngay sau lần đầu).
 
 ## Cấu Hình
 
-Ứng dụng dùng kết hợp hai nguồn cấu hình:
+Cấu hình được lưu trong **SQLite** (`data/fall_detection.db`, bảng `settings`). Thay đổi qua tab **Settings** trong UI, nhấn **Save Settings** là lưu ngay — không cần restart.
 
-```text
-.env hoặc environment variables
--> override
-data/config.json
--> cấu hình Web UI
-```
-
-Nên đặt secret trong `.env` hoặc environment:
+`.env` (tùy chọn) dùng để **override** các giá trị trong DB, phù hợp cho container hoặc secrets không muốn lưu trong DB:
 
 ```dotenv
+AI_API_KEY=sk-xxxxx
+TELEGRAM_BOT_TOKEN=123456789:AABBCCxx
+TELEGRAM_CHAT_ID=-100123456789
 RTSP_URL=rtsp://10.10.0.2:8554/bep_sub
-AI_API_KEY=sk-...
-TELEGRAM_BOT_TOKEN=123456:ABC...
-TELEGRAM_CHAT_ID=1602998514
 ```
 
-Các biến `.env` được hỗ trợ:
+Sao chép từ template:
 
-| Env | Config field |
-| --- | --- |
-| `RTSP_URL` | `rtsp_url` |
-| `AI_BASE_URL` | `ai_base_url` |
-| `AI_API_KEY` | `ai_api_key` |
-| `VISION_MODEL` | `vision_model` |
-| `DETECTION_MODE` | `detection_mode` |
-| `YOLO_MODEL` | `yolo_model` |
-| `TELEGRAM_BOT_TOKEN` | `telegram_bot_token` |
-| `TELEGRAM_CHAT_ID` | `telegram_chat_id` |
-| `CONFIDENCE` | `confidence` |
-| `VERIFY_INTERVAL` | `verify_interval` |
-| `ALERT_COOLDOWN` | `alert_cooldown` |
-| `FRAME_SKIP` | `frame_skip` |
-| `LOOP_SLEEP` | `loop_sleep` |
+```bash
+cp .env.example .env
+```
 
-Nếu một secret đã có trong `.env`, khi bấm **Save Settings** UI sẽ không ghi lại secret đó vào `data/config.json`.
+### Các biến `.env` được hỗ trợ
 
-Trong tab **Settings**:
+| Biến env | Config key | Mô tả |
+|---|---|---|
+| `RTSP_URL` | `rtsp_url` | RTSP stream fallback |
+| `GO2RTC_URL` | `go2rtc_url` | Base URL go2rtc |
+| `TELEGRAM_BOT_TOKEN` | `telegram_bot_token` | Bot token |
+| `TELEGRAM_CHAT_ID` | `telegram_chat_id` | Chat ID nhận alert |
+| `AI_BASE_URL` | `ai_base_url` | OpenAI-compatible endpoint |
+| `AI_API_KEY` | `ai_api_key` | API key |
+| `VISION_MODEL` | `vision_model` | Model vision |
+| `YOLO_MODEL` | `yolo_model` | File model YOLO |
+| `YOLO_IMGSZ` | `yolo_imgsz` | Kích thước ảnh inference |
+| `CONFIDENCE` | `confidence` | Ngưỡng detect person |
+| `VERIFY_INTERVAL` | `verify_interval` | Giây tối thiểu giữa 2 lần gọi AI |
+| `ALERT_COOLDOWN` | `alert_cooldown` | Giây tối thiểu giữa 2 cảnh báo Telegram |
+| `FRAME_SKIP` | `frame_skip` | Bỏ N-1 frame để giảm CPU |
+| `LOOP_SLEEP` | `loop_sleep` | Thời gian nghỉ mỗi vòng lặp (giây) |
+| `WEBHOOK_TOKEN` | `webhook_token` | Token bảo vệ API (tùy chọn) |
 
-| Field | Mô tả |
-| --- | --- |
-| `RTSP URL` | Fallback RTSP nếu không dùng được snapshot từ go2rtc, ví dụ `rtsp://10.10.0.2:8554/bep_sub` |
-| `go2rtc URL` | Base URL go2rtc để lấy snapshot và xem live trực tiếp, ví dụ `http://10.10.0.2:1984` |
-| `AI Base URL` | Base URL OpenAI-compatible, ví dụ `https://9router.minhhungtsbd.me/v1` |
-| `Vision Model` | Model vision, ví dụ `gh/oswe-vscode-prime` |
-| `AI API Key` | API key, nên lấy từ `.env` |
-| `AI Verify Prompt` | Prompt xác minh té ngã gửi tới AI. Có thể chỉnh trực tiếp trong UI |
-| `Detection Mode` | `Frigate/OpenVINO trigger` là mode nhẹ mặc định; `YOLO prefilter` chỉ dùng nếu tự cài OpenCV/Ultralytics; `AI interval only` gọi AI theo chu kỳ |
-| `YOLO Model` | Chỉ dùng cho mode YOLO, khuyến nghị `yolov8n.pt` để giảm RAM/CPU |
-| `YOLO Image Size` | Kích thước inference YOLO, ví dụ `416`; giảm xuống `320` sẽ nhẹ hơn nhưng kém chính xác hơn |
-| `Telegram Bot Token` | Bot token, nên lấy từ `.env` |
-| `Telegram Chat ID` | Chat nhận cảnh báo, có thể lấy từ `.env` |
-| `YOLO Confidence` | Ngưỡng phát hiện person |
-| `Verify Interval` | Khoảng cách tối thiểu giữa hai lần gọi AI khi có person |
-| `Alert Cooldown` | Khoảng cách tối thiểu giữa hai cảnh báo Telegram |
-| `Frame Skip` | Bỏ bớt frame để giảm CPU |
-| `Loop Sleep` | Thời gian nghỉ mỗi vòng lặp |
+> **Priority:** `.env` / os.environ > SQLite settings > default values
 
-Không commit file `.env` hoặc `data/config.json` vì có thể chứa token/API key.
+## Database
+
+Tất cả dữ liệu lưu trong `data/fall_detection.db`:
+
+| Bảng | Mô tả |
+|---|---|
+| `settings` | Config key-value (thay thế config.json) |
+| `events` | Log sự kiện (detect, verify, alert, error…) |
+| `users` | Tài khoản đăng nhập (username + bcrypt hash) |
+
+Ảnh snapshot của events lưu tại `data/event_images/` và tự xóa sau **24 giờ**.
+Events tự prune khi vượt **5000 records** (xóa batch cũ nhất).
+
+### Auto-migration
+
+Khi khởi động lần đầu, nếu tồn tại file cũ:
+
+- `data/config.json` → import vào bảng `settings` → rename thành `config.json.migrated`
+- `data/events.jsonl` → import vào bảng `events` → rename thành `events.jsonl.migrated`
 
 ## UI
 
-Các tab chính:
+| Tab | Chức năng |
+|---|---|
+| **Dashboard** | Start/Stop monitor, tổng quan trạng thái, 5 events gần nhất |
+| **Cameras** | Thêm/sửa/xóa camera, test snapshot, test AI từng camera |
+| **Live** | Xem stream live đa camera (go2rtc iframe hoặc MJPEG proxy) |
+| **Settings** | Cấu hình YOLO, AI API, Telegram, cooldown, RTSP… |
+| **Events** | Bảng log events với thumbnail ảnh, nút Clear All |
+| **Tools** | Test AI với snapshot, upload ảnh test, test Telegram |
 
-- **Dashboard**: Start/Stop monitor, xem tổng quan camera, go2rtc public URL, AI model và recent events.
-- **Cameras**: thêm nhiều camera, bật/tắt từng camera, cấu hình `go2rtc_src`, xem snapshot/video và test AI từng camera.
-- **Live**: xem nhiều camera cùng lúc bằng MJPEG proxy từ RTSP.
-- **Settings**: cấu hình go2rtc, AI, Frigate/YOLO mode, Telegram và timeout/cooldown.
-- **Events**: log các trạng thái `started`, `verified`, `telegram_sent`, `ai_error`, `rtsp_reconnect`.
-- **Tools**: test AI bằng snapshot mới nhất, upload ảnh test AI, test Telegram.
+URL hash: `#dashboard`, `#cameras`, `#live`, `#settings`, `#events`, `#tools`
 
-Các tab có hash URL riêng, ví dụ `#cameras`, `#live`, `#events`. Khi reload trang, UI sẽ giữ lại tab đang mở.
+## API Endpoints
 
-Mỗi event `verified`, `test_ai`, `test_ai_camera`, `test_ai_upload` lưu thêm trường `ai_raw`, là nội dung text AI trả về sau khi parse response từ 9Router/OpenAI-compatible gateway.
+Tất cả endpoint `/api/*` yêu cầu đăng nhập (JWT cookie). Trả `401` nếu chưa xác thực.
 
-Events hiển thị thời gian theo UTC+7 trên UI. Event vẫn lưu `time` UTC và thêm `time_local` UTC+7 trong file JSONL.
+```http
+GET  /                           # UI chính (redirect /login nếu chưa đăng nhập)
+GET  /login                      # Trang đăng nhập
+POST /auth/login                 # Form login
+POST /auth/logout                # Logout
 
-Các event có snapshot sẽ lưu ảnh trong:
+GET  /api/config                 # Đọc config hiện tại
+POST /api/config                 # Lưu config (JSON body)
+GET  /api/status                 # Trạng thái monitor + event count
+POST /api/start                  # Khởi động YOLO monitor
+POST /api/stop                   # Dừng monitor
 
-```text
-data/event_images
+GET  /api/events                 # Lấy danh sách events
+DELETE /api/events               # Xóa toàn bộ events
+
+GET  /api/camera/snapshot?index= # Chụp ảnh camera
+GET  /api/camera/video?index=    # MJPEG stream camera
+
+POST /api/test-ai                # Test AI với snapshot mới nhất
+POST /api/test-ai-camera?index=  # Test AI với snapshot camera cụ thể
+POST /api/test-telegram          # Test gửi Telegram
+POST /api/test-ai-upload         # Test AI với ảnh upload (max 10MB)
+
+GET  /api/event-image/{filename} # Ảnh event (static)
 ```
-
-Ảnh event được giữ tối đa 24 giờ, hiển thị thumbnail trong tab Events và có thể click để phóng to trong modal.
-
-Prompt mặc định yêu cầu AI trả đúng 2 dòng:
-
-```text
-SAFE hoặc EMERGENCY
-Mô tả dưới 20 ký tự
-```
-
-Backend sẽ lưu dòng 1 vào cột `AI`, dòng 2 vào cột `AI Raw / Message`, đồng thời giữ response đầy đủ trong trường event `ai_response` để debug.
 
 ## Nhiều Camera
 
-Danh sách camera được lưu trong `data/config.json`:
+Camera được cấu hình trong tab **Cameras**. Mỗi camera gồm:
 
-```json
-{
-  "cameras": [
-    {
-      "enabled": true,
-      "name": "bep",
-      "rtsp_url": "rtsp://10.10.0.2:8554/bep_sub",
-      "go2rtc_src": "bep",
-      "live_url": ""
-    }
-  ]
-}
-```
+| Field | Mô tả |
+|---|---|
+| Enabled | Bật/tắt camera |
+| Name | Tên hiển thị |
+| RTSP URL | URL RTSP để YOLO capture frame |
+| go2rtc src | Tên stream trong go2rtc (cho snapshot JPEG và live view) |
+| Live URL | (Tùy chọn) URL stream trực tiếp thay vì tự build từ go2rtc_src |
 
-Trong Frigate mode, mỗi camera nên có `go2rtc_src` và `go2rtc_url` để app lấy JPEG trực tiếp từ `{go2rtc_url}/api/frame.jpeg?src={go2rtc_src}`. Trường `rtsp_url` vẫn được giữ làm fallback cho cấu hình cũ. Nếu chưa có `cameras`, app sẽ tự tạo một camera mặc định từ `rtsp_url`.
+Thứ tự ưu tiên lấy **snapshot**:
 
-Live view ưu tiên nguồn trực tiếp từ go2rtc:
+1. go2rtc JPEG API: `{go2rtc_url}/api/frame.jpeg?src={go2rtc_src}`
+2. Fallback RTSP OpenCV
 
-1. Nếu camera có `live_url`, UI embed trực tiếp URL đó.
-2. Nếu camera có `go2rtc_src` và Settings có `go2rtc_url`, UI tự tạo:
+Thứ tự ưu tiên **live view**:
 
-```text
-{go2rtc_url}/stream.html?src={go2rtc_src}&mode=mse
-```
-
-3. Nếu thiếu cả hai, UI mới fallback sang Python MJPEG proxy `/api/camera/video`.
-
-Khuyến nghị dùng `go2rtc_src` hoặc `live_url` để live mượt hơn và tránh delay do Python/OpenCV proxy.
-
-Các endpoint camera:
-
-```http
-GET /api/camera/snapshot?index=0
-GET /api/camera/video?index=0
-POST /api/test-ai-camera?index=0
-```
-
-`/api/camera/video` trả MJPEG stream để browser xem trực tiếp được, thay vì mở RTSP raw.
+1. `live_url` nếu có (embed iframe)
+2. `{go2rtc_url}/stream.html?src={go2rtc_src}&mode=mse` (go2rtc MSE)
+3. `/api/camera/video?index=N` (Python MJPEG proxy — tốn CPU hơn)
 
 ## Chạy Nền Bằng systemd
-
-Ví dụ service:
 
 ```ini
 [Unit]
@@ -231,81 +188,39 @@ Description=Fall Detection Web
 After=network-online.target
 
 [Service]
-WorkingDirectory=/opt/fall_detection_web
-ExecStart=/opt/fall_detection_web/venv/bin/uvicorn app:app --host 0.0.0.0 --port 8090
+User=root
+WorkingDirectory=/opt/fall-detection
+ExecStart=/opt/fall-detection/venv/bin/uvicorn app:app --host 0.0.0.0 --port 8090
 Restart=always
 RestartSec=5
+EnvironmentFile=/opt/fall-detection/.env
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-## Kiến Trúc Gợi Ý
-
-```text
-HOME
-Camera
--> go2rtc
--> WireGuard
-
-DC/VPS
-Frigate/OpenVINO person detection
--> webhook /analyze hoặc /verify
--> go2rtc snapshot
--> AI fall verification
--> Telegram
+```bash
+systemctl enable --now fall-detection
+journalctl -u fall-detection -f
 ```
 
-## Realtime Notes
+## Dependencies
 
-Frigate mode không chạy vòng lặp phân tích ảnh trong app. App chỉ nằm chờ webhook, lấy snapshot mới nhất rồi gọi AI. Các capture thread chỉ dùng cho mode YOLO/AI interval cũ.
-
-## Resource Tuning
-
-Repo vẫn giữ `opencv-python` và `ultralytics` trong `requirements.txt` để có thể quay lại mode YOLO hoặc dùng MJPEG proxy khi cần. Tuy nhiên nếu chọn `Detection Mode = Frigate/OpenVINO trigger`, Python app không load YOLO model trong luồng chính. RAM/CPU phát hiện người lúc đó nằm ở Frigate/OpenVINO.
-
-Các cách giảm RAM/CPU:
-
-- Dùng `Detection Mode = Frigate/OpenVINO trigger`.
-- Cấu hình `go2rtc_url` và `go2rtc_src` để snapshot qua HTTP JPEG, tránh mở RTSP bằng OpenCV.
-- Không bấm `Start` ở mode YOLO nếu muốn Frigate chịu trách nhiệm detect person.
-
-Các log như:
-
-```text
-[h264] error while decoding
-[rtsp] RTP: bad cseq
+```
+fastapi          # Web framework
+uvicorn          # ASGI server
+opencv-python    # RTSP capture + MJPEG proxy
+ultralytics      # YOLO person detection
+requests         # AI API + Telegram (shared Session)
+bcrypt           # Password hashing
+python-jose      # JWT session token
+jinja2           # HTML templates
+python-multipart # Form + file upload parsing
 ```
 
-đến từ FFmpeg/OpenCV khi RTSP mất gói hoặc lệch thứ tự packet. App sẽ reconnect/tiếp tục đọc frame mới. Nếu lỗi xuất hiện dày đặc, nên ưu tiên RTSP TCP hoặc stream phụ ổn định hơn từ go2rtc.
+## Lưu Ý
 
-## Frigate/OpenVINO Trigger Mode
-
-Chọn `Detection Mode = Frigate/OpenVINO trigger` nếu Frigate đã detect `person`.
-Mode này không load YOLO/PyTorch và không chạy object detection trong app.
-
-Frigate hoặc Home Assistant gọi một trong các webhook:
-
-```http
-POST /api/frigate-trigger
-POST /verify
-POST /analyze
-Content-Type: application/json
-```
-
-Payload tối thiểu:
-
-```json
-{
-  "camera": "bep",
-  "label": "person",
-  "score": 0.82
-}
-```
-
-Payload Frigate event có `after.camera`, `after.label`, `after.top_score` cũng được hỗ trợ.
-Tên camera sẽ được map với `name` hoặc `go2rtc_src` trong danh sách Cameras. Khi nhận trigger hợp lệ, app ưu tiên chụp snapshot từ go2rtc JPEG; nếu thiếu `go2rtc_url` hoặc `go2rtc_src` thì fallback sang RTSP. Sau đó app gọi AI verify và gửi Telegram nếu AI trả về `EMERGENCY`.
-
-Khi save Settings hoặc Cameras trong UI lúc monitor đang chạy, app sẽ tự restart monitor worker với cấu hình mới. Không cần restart uvicorn.
-
-Với Frigate mode, endpoint webhook vẫn hoạt động dù YOLO được cài sẵn, vì app chỉ chạy verify khi Frigate gửi event `person`.
+- `data/` đã được gitignore — DB, ảnh, `.env` không bao giờ bị commit.
+- Khi save Settings từ UI, giá trị trong DB được cập nhật ngay; monitor tự restart với config mới.
+- AI API chấp nhận response dạng JSON, SSE (`data: ...`) và multiple JSON objects (tương thích nhiều gateway).
+- bcrypt truncate password ở 72 bytes (giới hạn của thuật toán bcrypt).
