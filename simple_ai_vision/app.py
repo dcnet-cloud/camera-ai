@@ -576,14 +576,6 @@ cháy"></textarea>
       <h2>Live</h2>
       <div class="grid">
         <div>
-          <label for="liveSourceFilter">Live Source</label>
-          <select id="liveSourceFilter">
-            <option value="all">Both sources</option>
-            <option value="entity">Entities only</option>
-            <option value="go2rtc">go2rtc only</option>
-          </select>
-        </div>
-        <div>
           <label for="liveLimit">Camera Limit</label>
           <input id="liveLimit" type="number" min="1" placeholder="All">
         </div>
@@ -669,13 +661,9 @@ cháy"></textarea>
       return apiPath(`api/camera/frame?camera=${encodeURIComponent(camera)}&_=${Date.now()}`);
     }
 
-    function entitySnapshotUrl(entityId) {
-      return apiPath(`api/camera/frame?entity_id=${encodeURIComponent(entityId)}&_=${Date.now()}`);
-    }
-
     function cameraFrameUrl(camera) {
       const item = normalizeCamera(camera);
-      return item.src ? snapshotUrl(item.src) : entitySnapshotUrl(item.entity_id);
+      return snapshotUrl(item.src);
     }
 
     async function requestJson(path, options = {}, timeoutMs = 45000) {
@@ -720,54 +708,30 @@ cháy"></textarea>
       payload.mqtt_enabled = document.getElementById("mqtt_enabled").checked;
       payload.keyword_match = linesToList(document.getElementById("keyword_match").value);
       payload.cameras = cameras.map(normalizeCamera).filter(camera => (
-        camera.name || camera.entity_id || camera.src
+        camera.name || camera.src
       ));
       return payload;
     }
 
     function normalizeCamera(camera) {
       if (typeof camera === "string") {
-        return {enabled: true, name: "", entity_id: "", trigger_entity_id: "", src: camera.trim()};
+        return {enabled: true, name: "", src: camera.trim()};
       }
       return {
         enabled: camera?.enabled !== false,
         name: String(camera?.name || "").trim(),
-        entity_id: String(camera?.entity_id || "").trim(),
-        trigger_entity_id: String(camera?.trigger_entity_id || "").trim(),
         src: String(camera?.src || "").trim()
       };
     }
 
     function cameraLabel(camera) {
       const item = normalizeCamera(camera);
-      return item.name || item.entity_id || item.src || "Camera";
-    }
-
-    function camerasWithSrc() {
-      return cameras.map(normalizeCamera).filter(camera => camera.src);
-    }
-
-    function camerasWithPreview() {
-      return cameras.map(normalizeCamera).filter(camera => camera.src || camera.entity_id);
+      return item.name || item.src || "Camera";
     }
 
     function liveCameraItems() {
-      const source = document.getElementById("liveSourceFilter")?.value || "all";
       const limitValue = document.getElementById("liveLimit")?.value.trim() || "";
-      let items = camerasWithPreview();
-
-      if (source === "entity") {
-        items = items.filter(camera => camera.entity_id)
-          .map(camera => ({...camera, live_source: "entity"}));
-      } else if (source === "go2rtc") {
-        items = items.filter(camera => camera.src)
-          .map(camera => ({...camera, live_source: "go2rtc"}));
-      } else {
-        items = items.map(camera => ({
-          ...camera,
-          live_source: camera.src ? "go2rtc" : "entity"
-        }));
-      }
+      let items = cameras.map(normalizeCamera).filter(camera => camera.src);
 
       if (/^[1-9][0-9]*$/.test(limitValue)) {
         items = items.slice(0, Number(limitValue));
@@ -879,7 +843,7 @@ cháy"></textarea>
 
     function snapshotSourceOrError(camera) {
       const item = normalizeCamera(camera);
-      if (item.src || item.entity_id) return item;
+      if (item.src) return item;
       document.getElementById("result").textContent = "go2rtc src is required.";
       return null;
     }
@@ -906,14 +870,13 @@ cháy"></textarea>
     function viewSnapshot(camera, label = "") {
       const item = snapshotSourceOrError(camera);
       if (!item) return;
-      currentSnapshotCamera = item.src || item.entity_id;
+      currentSnapshotCamera = item.src;
       const img = document.createElement("img");
       img.id = "snapshotImage";
       img.dataset.src = item.src;
-      img.dataset.entityId = item.entity_id;
-      img.alt = `Snapshot ${label || item.src || item.entity_id}`;
+      img.alt = `Snapshot ${label || item.src}`;
       img.src = cameraFrameUrl(item);
-      showViewer(`Snapshot: ${label || item.src || item.entity_id}`, img, img.src);
+      showViewer(`Snapshot: ${label || item.src}`, img, img.src);
     }
 
     function viewVideo(camera, label = "") {
@@ -933,20 +896,18 @@ cháy"></textarea>
       const img = document.createElement("img");
       img.id = "snapshotImage";
       img.dataset.src = item.src;
-      img.dataset.entityId = item.entity_id;
-      img.alt = `Live snapshot ${label || item.src || item.entity_id}`;
+      img.alt = `Live snapshot ${label || item.src}`;
       img.src = cameraFrameUrl(item);
-      currentSnapshotCamera = item.src || item.entity_id;
-      showViewer(`Live snapshot: ${label || item.src || item.entity_id}`, img, img.src);
-      viewerRefreshTimer = setInterval(refreshSnapshot, item.src ? 1500 : 3000);
+      currentSnapshotCamera = item.src;
+      showViewer(`Live snapshot: ${label || item.src}`, img, img.src);
+      viewerRefreshTimer = setInterval(refreshSnapshot, 1500);
     }
 
     function refreshSnapshot() {
       const img = document.getElementById("snapshotImage");
       if (!img) return;
       const src = img.dataset.src || "";
-      const entityId = img.dataset.entityId || "";
-      img.src = src ? snapshotUrl(src) : entitySnapshotUrl(entityId);
+      img.src = snapshotUrl(src);
       currentViewerUrl = img.src;
     }
 
@@ -1003,7 +964,7 @@ cháy"></textarea>
         setStatus("streamStatus", "Select a go2rtc stream first, or use Add Camera for manual input.", "err");
         return;
       }
-      cameras.push({enabled: true, name: src, entity_id: "", trigger_entity_id: "", src});
+      cameras.push({enabled: true, name: src, src});
       renderCameras();
       setStatus("streamStatus", `Added go2rtc stream ${src}`, "ok");
     }
@@ -1030,20 +991,19 @@ cháy"></textarea>
         title.className = "live-title";
         const name = document.createElement("div");
         name.textContent = cameraLabel(camera);
-        const src = document.createElement("span");
-        src.textContent = camera.live_source === "go2rtc" ? camera.src : camera.entity_id;
-        title.append(name, src);
+        const srcLabel = document.createElement("span");
+        srcLabel.textContent = camera.src;
+        title.append(name, srcLabel);
 
         let media;
-        if (camera.live_source === "go2rtc" && hasGo2rtcUrl()) {
+        if (hasGo2rtcUrl()) {
           media = document.createElement("iframe");
           media.src = buildGo2rtcUrl(camera.src, "/stream.html", {mode: "mse"});
           media.allow = "autoplay; fullscreen; picture-in-picture";
         } else {
           media = document.createElement("img");
           media.dataset.src = camera.src;
-          media.dataset.entityId = camera.entity_id;
-          media.src = camera.src ? snapshotUrl(camera.src) : entitySnapshotUrl(camera.entity_id);
+          media.src = snapshotUrl(camera.src);
           media.alt = `Live snapshot ${cameraLabel(camera)}`;
         }
         media.title = `Live ${cameraLabel(camera)}`;
@@ -1055,8 +1015,7 @@ cháy"></textarea>
       liveRefreshTimer = setInterval(() => {
         document.querySelectorAll("#liveGrid img").forEach(img => {
           const src = img.dataset.src || "";
-          const entityId = img.dataset.entityId || "";
-          img.src = src ? snapshotUrl(src) : entitySnapshotUrl(entityId);
+          img.src = snapshotUrl(src);
         });
       }, 5000);
     }
@@ -1163,13 +1122,10 @@ cháy"></textarea>
       if (!item) return;
       document.getElementById("result").textContent = "Running camera test...";
       try {
-        const body = item.src
-          ? {camera: item.src, entity_id: item.entity_id}
-          : {entity_id: item.entity_id};
         const {data} = await requestJson("analyze", {
           method: "POST",
           headers: {"Content-Type": "application/json"},
-          body: JSON.stringify(body)
+          body: JSON.stringify({camera: item.src})
         }, 90000);
         document.getElementById("result").textContent = JSON.stringify(data, null, 2);
       } catch (err) {
@@ -1239,11 +1195,10 @@ cháy"></textarea>
     document.getElementById("loadStreamsBtn").addEventListener("click", loadGo2rtcStreams);
     document.getElementById("addStreamBtn").addEventListener("click", addSelectedStream);
     document.getElementById("refreshLiveBtn").addEventListener("click", renderLiveCameras);
-    document.getElementById("liveSourceFilter").addEventListener("change", renderLiveCameras);
     document.getElementById("liveLimit").addEventListener("input", renderLiveCameras);
     document.getElementById("refreshEventsBtn").addEventListener("click", loadEvents);
     document.getElementById("addCameraBtn").addEventListener("click", () => {
-      cameras.push({enabled: true, name: "", entity_id: "", trigger_entity_id: "", src: ""});
+      cameras.push({enabled: true, name: "", src: ""});
       renderCameras();
     });
     document.getElementById("closeViewerBtn").addEventListener("click", () => {
@@ -1417,19 +1372,17 @@ def normalize_camera_list(cameras: list[Any]) -> list[dict[str, str]]:
     normalized = []
     for camera in cameras:
         if isinstance(camera, str):
-            item = {"enabled": True, "name": "", "entity_id": "", "src": camera.strip()}
+            item = {"enabled": True, "name": "", "src": camera.strip()}
         elif isinstance(camera, dict):
             item = {
                 "enabled": camera.get("enabled") is not False,
                 "name": str(camera.get("name", "")).strip(),
-                "entity_id": str(camera.get("entity_id", "")).strip(),
-                "trigger_entity_id": str(camera.get("trigger_entity_id", "")).strip(),
                 "src": str(camera.get("src", "")).strip(),
             }
         else:
             continue
 
-        if item["name"] or item["entity_id"] or item["src"]:
+        if item["name"] or item["src"]:
             normalized.append(item)
 
     return normalized
@@ -1447,10 +1400,8 @@ def validate_saved_options(options: dict[str, Any]) -> None:
             raise ValueError("camera entries must be objects")
         if camera.get("src"):
             validate_camera(camera["src"])
-        elif camera.get("entity_id"):
-            validate_entity_id(camera["entity_id"])
         elif camera.get("name"):
-            raise ValueError("go2rtc src or HA entity is required for each camera")
+            raise ValueError("go2rtc src is required for each camera")
 
     for key in ("ai_timeout", "snapshot_timeout", "telegram_timeout"):
         try:
@@ -1472,14 +1423,11 @@ def validate_saved_options(options: dict[str, Any]) -> None:
 def find_saved_camera(
     options: dict[str, Any],
     camera: str | None,
-    entity_id: str | None,
 ) -> dict[str, str] | None:
     for item in options.get("cameras", []):
         if not isinstance(item, dict):
             continue
         if camera and item.get("src") == camera:
-            return item
-        if entity_id and item.get("entity_id") == entity_id:
             return item
     return None
 
@@ -1538,17 +1486,6 @@ def validate_camera(camera: Any) -> str:
         raise ValueError("invalid camera name")
 
     return camera
-
-
-def validate_entity_id(entity_id: Any) -> str:
-    if not isinstance(entity_id, str) or not entity_id.strip():
-        raise ValueError("entity_id is required")
-
-    entity_id = entity_id.strip()
-    if not re.fullmatch(r"^(camera|image)\.[A-Za-z0-9_]+$", entity_id):
-        raise ValueError("invalid Home Assistant camera entity")
-
-    return entity_id
 
 
 def resolve_go2rtc_url(options: dict[str, Any]) -> str:
@@ -1640,51 +1577,9 @@ def fetch_snapshot_with_fallback(camera: str, options: dict[str, Any]) -> str:
         return fetch_frigate_snapshot(camera, options)
 
 
-def fetch_hass_snapshot(entity_id: str, options: dict[str, Any]) -> str:
-    entity_id = validate_entity_id(entity_id)
-    token = os.environ.get("SUPERVISOR_TOKEN", "")
-    if not token:
-        raise ValueError("Home Assistant API is not available")
-
-    logger.info("Fetching Home Assistant snapshot for entity=%s", entity_id)
-    response = requests.get(
-        f"http://supervisor/core/api/camera_proxy/{entity_id}",
-        headers={"Authorization": f"Bearer {token}"},
-        timeout=options["snapshot_timeout"],
-    )
-    response.raise_for_status()
-
-    content_type = response.headers.get("content-type", "")
-    if "image" not in content_type and not response.content.startswith(b"\xff\xd8"):
-        raise ValueError("Home Assistant camera response is not an image")
-
-    tmp = tempfile.NamedTemporaryFile(
-        mode="wb",
-        suffix=".jpg",
-        prefix=f"simple_ai_vision_{entity_id.replace('.', '_')}_",
-        dir="/tmp",
-        delete=False,
-    )
-    with tmp:
-        tmp.write(response.content)
-
-    return tmp.name
-
-
-def fetch_snapshot_for_source(
-    camera: str | None,
-    entity_id: str | None,
-    options: dict[str, Any],
-) -> tuple[str, str]:
-    if camera:
-        camera_name = validate_camera(camera)
-        return fetch_snapshot_with_fallback(camera_name, options), camera_name
-
-    if entity_id:
-        entity = validate_entity_id(entity_id)
-        return fetch_hass_snapshot(entity, options), entity
-
-    raise ValueError("camera or entity_id is required")
+def fetch_camera_snapshot(camera: str, options: dict[str, Any]) -> tuple[str, str]:
+    camera_name = validate_camera(camera)
+    return fetch_snapshot_with_fallback(camera_name, options), camera_name
 
 
 def image_to_data_url(path: str) -> str:
@@ -2217,94 +2112,6 @@ def read_events(limit: int = 100) -> list[dict[str, str]]:
     return events
 
 
-def get_hass_camera_entities() -> list[dict[str, str]]:
-    token = os.environ.get("SUPERVISOR_TOKEN", "")
-    if not token:
-        raise ValueError("Home Assistant API is not available")
-
-    response = requests.get(
-        "http://supervisor/core/api/states",
-        headers={"Authorization": f"Bearer {token}"},
-        timeout=10,
-    )
-    response.raise_for_status()
-
-    try:
-        states = response.json()
-    except ValueError as exc:
-        raise ValueError("Home Assistant returned non-JSON response") from exc
-
-    if not isinstance(states, list):
-        raise ValueError("Home Assistant returned invalid states payload")
-
-    entities: list[dict[str, str]] = []
-    for item in states:
-        if not isinstance(item, dict):
-            continue
-
-        entity_id = str(item.get("entity_id", "")).strip()
-        domain = entity_id.split(".", 1)[0]
-        if domain not in ("camera", "image"):
-            continue
-
-        attributes = item.get("attributes", {})
-        name = ""
-        if isinstance(attributes, dict):
-            name = str(attributes.get("friendly_name", "")).strip()
-
-        entities.append({"entity_id": entity_id, "name": name})
-
-    return sorted(entities, key=lambda entity: entity["entity_id"])
-
-
-def get_hass_trigger_entities() -> list[dict[str, str]]:
-    token = os.environ.get("SUPERVISOR_TOKEN", "")
-    if not token:
-        raise ValueError("Home Assistant API is not available")
-
-    response = requests.get(
-        "http://supervisor/core/api/states",
-        headers={"Authorization": f"Bearer {token}"},
-        timeout=10,
-    )
-    response.raise_for_status()
-
-    try:
-        states = response.json()
-    except ValueError as exc:
-        raise ValueError("Home Assistant returned non-JSON response") from exc
-
-    if not isinstance(states, list):
-        raise ValueError("Home Assistant returned invalid states payload")
-
-    entities: list[dict[str, str]] = []
-    for item in states:
-        if not isinstance(item, dict):
-            continue
-
-        entity_id = str(item.get("entity_id", "")).strip()
-        domain = entity_id.split(".", 1)[0]
-        if domain not in ("binary_sensor", "sensor"):
-            continue
-
-        attributes = item.get("attributes", {})
-        name = ""
-        device_class = ""
-        if isinstance(attributes, dict):
-            name = str(attributes.get("friendly_name", "")).strip()
-            device_class = str(attributes.get("device_class", "")).strip()
-
-        entities.append(
-            {
-                "entity_id": entity_id,
-                "name": name,
-                "device_class": device_class,
-            }
-        )
-
-    return sorted(entities, key=lambda entity: entity["entity_id"])
-
-
 @app.get("/health")
 def health() -> dict[str, bool]:
     return {"success": True}
@@ -2322,42 +2129,6 @@ def get_config() -> JSONResponse:
     except (OSError, json.JSONDecodeError) as exc:
         logger.error("Could not read config: %s", exc)
         return error_response("could not read config", 500)
-
-
-@app.get("/api/hass/cameras")
-def hass_cameras() -> JSONResponse:
-    try:
-        return JSONResponse({"success": True, "entities": get_hass_camera_entities()})
-    except ValueError as exc:
-        logger.error("%s", exc)
-        return error_response(str(exc), 400)
-    except requests.Timeout:
-        logger.error("Home Assistant entity load timeout")
-        return JSONResponse({"success": False, "error": "Home Assistant API timeout"})
-    except requests.HTTPError as exc:
-        logger.error("Home Assistant API HTTP error: %s", exc)
-        return upstream_error_response(exc)
-    except requests.RequestException as exc:
-        logger.error("Home Assistant API network error: %s", exc)
-        return JSONResponse({"success": False, "error": "Home Assistant API network error", "details": str(exc)})
-
-
-@app.get("/api/hass/triggers")
-def hass_triggers() -> JSONResponse:
-    try:
-        return JSONResponse({"success": True, "entities": get_hass_trigger_entities()})
-    except ValueError as exc:
-        logger.error("%s", exc)
-        return error_response(str(exc), 400)
-    except requests.Timeout:
-        logger.error("Home Assistant trigger load timeout")
-        return JSONResponse({"success": False, "error": "Home Assistant API timeout"})
-    except requests.HTTPError as exc:
-        logger.error("Home Assistant trigger API HTTP error: %s", exc)
-        return upstream_error_response(exc)
-    except requests.RequestException as exc:
-        logger.error("Home Assistant trigger API network error: %s", exc)
-        return JSONResponse({"success": False, "error": "Home Assistant API network error", "details": str(exc)})
 
 
 @app.get("/api/go2rtc/streams")
@@ -2395,15 +2166,11 @@ def events() -> JSONResponse:
 
 
 @app.get("/api/camera/frame")
-def camera_frame(camera: str = "", entity_id: str = "") -> Response:
+def camera_frame(camera: str = "") -> Response:
     snapshot_path = None
     try:
         options = read_options()
-        snapshot_path, _ = fetch_snapshot_for_source(
-            camera.strip() or None,
-            entity_id.strip() or None,
-            options,
-        )
+        snapshot_path, _ = fetch_camera_snapshot(camera.strip(), options)
         with open(snapshot_path, "rb") as file:
             content = file.read()
 
@@ -2533,16 +2300,14 @@ async def analyze(request: Request) -> JSONResponse:
 
         options = load_options()
         camera_value = str(body.get("camera", "")).strip()
-        entity_value = str(body.get("entity_id", "")).strip()
-        event_camera = camera_value or entity_value or "unknown"
-        logger.info("Analyze request camera=%s entity_id=%s", camera_value, entity_value)
+        event_camera = camera_value or "unknown"
+        logger.info("Analyze request camera=%s", camera_value)
         saved_camera = find_saved_camera(
             options,
             camera_value or None,
-            entity_value or None,
         )
         if saved_camera and saved_camera.get("enabled") is False:
-            camera_name = saved_camera.get("src") or saved_camera.get("entity_id") or "camera"
+            camera_name = saved_camera.get("src") or "camera"
             logger.info("Skipping disabled camera=%s", camera_name)
             return JSONResponse(
                 {
@@ -2553,11 +2318,7 @@ async def analyze(request: Request) -> JSONResponse:
                 }
             )
 
-        snapshot_path, camera = fetch_snapshot_for_source(
-            camera_value or None,
-            entity_value or None,
-            options,
-        )
+        snapshot_path, camera = fetch_camera_snapshot(camera_value, options)
         event_camera = camera
         data_url = image_to_data_url(snapshot_path)
         analysis = call_ai(data_url, options)
