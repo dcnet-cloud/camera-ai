@@ -172,15 +172,23 @@ def parse_ai_verdict(content: str) -> tuple[str, str, str]:
 # Main calls
 # ──────────────────────────────────────────────
 
-def verify_scene(image_path: Path, config: dict[str, Any]) -> tuple[str, str, str]:
-    require_config(config, ["ai_api_key", "ai_base_url", "vision_model", "verify_prompt"])
+def verify_scene(image_path: Path, config: dict[str, Any], camera: dict[str, Any] | None = None) -> tuple[str, str, str]:
+    require_config(config, ["ai_api_key", "ai_base_url", "vision_model"])
+    
+    prompt_text = str(config.get("verify_prompt", ""))
+    if camera and camera.get("prompt_id"):
+        for p in config.get("prompts", []):
+            if p.get("id") == camera.get("prompt_id"):
+                prompt_text = str(p.get("content", prompt_text))
+                break
+
     payload = {
         "model": config["vision_model"],
         "messages": [
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": str(config["verify_prompt"])},
+                    {"type": "text", "text": prompt_text},
                     {"type": "image_url", "image_url": {"url": image_to_data_url(image_path)}},
                 ],
             }

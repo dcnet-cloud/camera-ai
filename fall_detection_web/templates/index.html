@@ -378,6 +378,7 @@
     <nav class="tabs">
       <button class="tab-btn active" data-tab="dashboardPanel" type="button">Dashboard</button>
       <button class="tab-btn" data-tab="camerasPanel" type="button">Cameras</button>
+      <button class="tab-btn" data-tab="promptsPanel" type="button">Prompts</button>
       <button class="tab-btn" data-tab="livePanel" type="button">Live</button>
       <button class="tab-btn" data-tab="settingsPanel" type="button">Settings</button>
       <button class="tab-btn" data-tab="eventsPanel" type="button">Events</button>
@@ -423,20 +424,54 @@
 
     <section id="camerasPanel" class="tab-panel hidden">
       <div class="panel">
-        <h2>Cameras</h2>
-        <div class="camera-head">
-          <div>Enabled</div>
-          <div>Name</div>
-          <div>RTSP URL</div>
-          <div>go2rtc src</div>
-          <div>Live URL</div>
-          <div>Actions</div>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+          <h2>Cameras</h2>
+          <div class="actions">
+            <button id="addCameraBtn" class="primary" type="button">Add Camera</button>
+            <button id="saveCamerasBtn" class="primary hidden" type="button">Save Cameras</button>
+            <span id="cameraStatus"></span>
+          </div>
         </div>
-        <div id="cameraList"></div>
-        <div class="actions" style="margin-top:14px">
-          <button id="addCameraBtn" type="button">Add Camera</button>
-          <button id="saveCamerasBtn" class="primary" type="button">Save Cameras</button>
-          <span id="cameraStatus"></span>
+        <div class="table-wrap">
+          <table style="width: 100%; border-collapse: collapse; text-align: left;">
+            <thead>
+              <tr style="border-bottom: 1px solid var(--line);">
+                <th style="padding: 10px; width: 60px;">Enabled</th>
+                <th style="padding: 10px;">Name</th>
+                <th style="padding: 10px;">RTSP URL</th>
+                <th style="padding: 10px;">go2rtc src</th>
+                <th style="padding: 10px;">Live URL</th>
+                <th style="padding: 10px;">Prompt</th>
+                <th style="padding: 10px; text-align: right;">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="cameraTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="promptsPanel" class="tab-panel hidden">
+      <div class="panel">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+          <h2>AI Prompts</h2>
+          <div class="actions">
+            <button id="addPromptBtn" class="primary" type="button">Add Prompt</button>
+            <button id="savePromptsBtn" class="primary hidden" type="button">Save Prompts</button>
+            <span id="promptStatus"></span>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table style="width: 100%; border-collapse: collapse; text-align: left;">
+            <thead>
+              <tr style="border-bottom: 1px solid var(--line);">
+                <th style="padding: 10px; width: 25%;">Title</th>
+                <th style="padding: 10px;">Content</th>
+                <th style="padding: 10px; text-align: right; width: 120px;">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="promptTableBody"></tbody>
+          </table>
         </div>
       </div>
     </section>
@@ -456,14 +491,6 @@
       <div class="panel">
         <h2>Settings</h2>
         <div class="grid">
-          <div class="full">
-            <label for="rtsp_url">RTSP URL</label>
-            <input id="rtsp_url" autocomplete="off" placeholder="rtsp://10.10.0.2:8554/bep_sub">
-          </div>
-          <div class="full">
-            <label for="go2rtc_url">go2rtc URL</label>
-            <input id="go2rtc_url" autocomplete="off" placeholder="http://10.10.0.2:1984 hoặc https://go2rtc.example">
-          </div>
           <div>
             <label for="ai_base_url">AI Base URL</label>
             <input id="ai_base_url" autocomplete="off" placeholder="https://9router.minhhungtsbd.me/v1">
@@ -599,17 +626,71 @@
       </div>
       <div id="viewerBody" class="viewer-body"></div>
     </dialog>
+
+    <dialog id="cameraModal" style="padding: 24px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); width: 100%; max-width: 500px;">
+      <h2 id="cameraModalTitle" style="margin-bottom: 16px;">Add Camera</h2>
+      <div class="grid" style="grid-template-columns: 1fr;">
+        <label style="display: flex; align-items: center; gap: 8px; font-weight: bold;">
+          <input type="checkbox" id="modalCamEnabled" checked> Enabled
+        </label>
+        <div>
+          <label>Name</label>
+          <input id="modalCamName" type="text" autocomplete="off" placeholder="bep_sub">
+        </div>
+        <div>
+          <label>RTSP URL</label>
+          <input id="modalCamRtsp" type="text" autocomplete="off" placeholder="rtsp://10.10.0.2:8554/bep_sub">
+        </div>
+        <div>
+          <label>go2rtc src</label>
+          <input id="modalCamGo2rtc" type="text" autocomplete="off" placeholder="bep_sub">
+        </div>
+        <div>
+          <label>Live URL (Optional)</label>
+          <input id="modalCamLive" type="text" autocomplete="off" placeholder="http://10.10.0.2:1984/stream.html?src=bep_sub">
+        </div>
+        <div>
+          <label>AI Prompt</label>
+          <select id="modalCamPrompt">
+            <option value="">Global Fallback (Default)</option>
+          </select>
+        </div>
+      </div>
+      <div style="display: flex; gap: 12px; margin-top: 24px; justify-content: flex-end;">
+        <button id="modalCamCancelBtn" type="button">Cancel</button>
+        <button id="modalCamSaveBtn" class="primary" type="button">Save</button>
+      </div>
+    </dialog>
+
+    <dialog id="promptModal" style="padding: 24px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); width: 100%; max-width: 600px;">
+      <h2 id="promptModalTitle" style="margin-bottom: 16px;">Add Prompt</h2>
+      <div class="grid" style="grid-template-columns: 1fr;">
+        <div>
+          <label>Title</label>
+          <input id="modalPromptTitle" type="text" autocomplete="off" placeholder="Cổng trước">
+        </div>
+        <div>
+          <label>Content</label>
+          <textarea id="modalPromptContent" placeholder="Bạn là hệ thống giám sát..."></textarea>
+        </div>
+      </div>
+      <div style="display: flex; gap: 12px; margin-top: 24px; justify-content: flex-end;">
+        <button id="modalPromptCancelBtn" type="button">Cancel</button>
+        <button id="modalPromptSaveBtn" class="primary" type="button">Save</button>
+      </div>
+    </dialog>
   </main>
 
   <script>
     let cameras = [];
+    let prompts = [];
     let currentViewerUrl = "";
     let currentViewerMode = "";
     let latestEvents = [];
     let latestStatus = {};
     const numericIds = ["confidence", "verify_interval", "alert_cooldown", "frame_skip", "loop_sleep", "yolo_imgsz"];
     const configIds = [
-      "rtsp_url", "go2rtc_url", "ai_base_url", "ai_api_key", "vision_model", "verify_prompt", "detection_mode", "yolo_model",
+      "ai_base_url", "ai_api_key", "vision_model", "verify_prompt", "detection_mode", "yolo_model",
       "telegram_bot_token", "telegram_chat_id", "webhook_token", ...numericIds
     ];
 
@@ -653,14 +734,19 @@
         data[id] = numericIds.includes(id) ? Number(raw) : raw;
       }
       data.cameras = cameras;
+      data.prompts = prompts;
       return data;
     }
     function renderConfig(config) {
       for (const id of configIds) {
-        if (config[id] !== undefined) document.getElementById(id).value = config[id];
+        if (config[id] !== undefined && document.getElementById(id)) {
+          document.getElementById(id).value = config[id];
+        }
       }
       cameras = Array.isArray(config.cameras) ? config.cameras : [];
+      prompts = Array.isArray(config.prompts) ? config.prompts : [];
       renderCameras();
+      renderPrompts();
       renderLive();
       renderDashboard();
     }
@@ -757,7 +843,7 @@
     function renderDashboard() {
       const enabled = cameras.map(normalizeCamera).filter(camera => camera.enabled);
       setText("enabledCameraCount", enabled.length);
-      setText("dashboardGo2rtc", document.getElementById("go2rtc_url").value.trim() || "-");
+      setText("dashboardGo2rtc", "-");
       setText("dashboardModel", document.getElementById("vision_model").value.trim() || "-");
 
       const cameraList = document.getElementById("dashboardCameras");
@@ -846,7 +932,8 @@
         name: camera.name || "",
         rtsp_url: camera.rtsp_url || "",
         go2rtc_src: camera.go2rtc_src || "",
-        live_url: camera.live_url || ""
+        live_url: camera.live_url || "",
+        prompt_id: camera.prompt_id || ""
       };
     }
     function streamNameFromRtsp(rtspUrl) {
@@ -855,9 +942,7 @@
       return parts[parts.length - 1] || "";
     }
     function go2rtcStreamUrl(src) {
-      const base = document.getElementById("go2rtc_url").value.trim().replace(/\/$/, "");
-      if (!base || !src) return "";
-      return `${base}/stream.html?src=${encodeURIComponent(src)}&mode=mse`;
+      return "";
     }
     function cameraLiveUrl(camera) {
       const item = normalizeCamera(camera);
@@ -871,107 +956,188 @@
       return {url: `/api/camera/video?index=${index}`, mode: "video"};
     }
     function cameraSnapshotSource(camera, index) {
-      const item = normalizeCamera(camera);
-      const base = document.getElementById("go2rtc_url").value.trim().replace(/\/$/, "");
-      if (base && item.go2rtc_src.trim()) {
-        return `${base}/api/frame.jpeg?src=${encodeURIComponent(item.go2rtc_src.trim())}`;
-      }
       return `/api/camera/snapshot?index=${index}`;
     }
+    let editingCameraIndex = -1;
+    let editingPromptId = null;
+
+    function renderPrompts() {
+      const body = document.getElementById("promptTableBody");
+      body.innerHTML = "";
+      prompts.forEach((p) => {
+        const tr = document.createElement("tr");
+        tr.style.borderBottom = "1px solid var(--line)";
+        tr.innerHTML = `
+          <td style="padding: 10px;">${p.title || "-"}</td>
+          <td style="padding: 10px;">${(p.content || "").substring(0, 50)}...</td>
+          <td style="padding: 10px; text-align: right;">
+            <button class="edit-prompt" style="margin-right: 8px;">Edit</button>
+            <button class="danger remove-prompt">Remove</button>
+          </td>
+        `;
+        tr.querySelector(".edit-prompt").onclick = () => openPromptModal(p.id);
+        tr.querySelector(".remove-prompt").onclick = () => {
+          prompts = prompts.filter(x => x.id !== p.id);
+          renderPrompts();
+          saveConfigDirectly("promptStatus");
+        };
+        body.appendChild(tr);
+      });
+      // Populate prompt dropdown in camera modal
+      const select = document.getElementById("modalCamPrompt");
+      select.innerHTML = '<option value="">Global Fallback (Default)</option>';
+      prompts.forEach(p => {
+        const opt = document.createElement("option");
+        opt.value = p.id;
+        opt.textContent = p.title;
+        select.appendChild(opt);
+      });
+    }
+
+    function openPromptModal(id = null) {
+      editingPromptId = id;
+      const modal = document.getElementById("promptModal");
+      document.getElementById("promptModalTitle").textContent = id ? "Edit Prompt" : "Add Prompt";
+      
+      let p = prompts.find(x => x.id === id) || {title: "", content: ""};
+      document.getElementById("modalPromptTitle").value = p.title;
+      document.getElementById("modalPromptContent").value = p.content;
+      modal.showModal();
+    }
+
+    document.getElementById("addPromptBtn").onclick = () => openPromptModal(null);
+    document.getElementById("modalPromptCancelBtn").onclick = () => document.getElementById("promptModal").close();
+    document.getElementById("modalPromptSaveBtn").onclick = () => {
+      const title = document.getElementById("modalPromptTitle").value.trim();
+      const content = document.getElementById("modalPromptContent").value.trim();
+      if (!title || !content) return alert("Title and content are required");
+      
+      if (editingPromptId) {
+        const p = prompts.find(x => x.id === editingPromptId);
+        if (p) { p.title = title; p.content = content; }
+      } else {
+        prompts.push({id: "p_" + Date.now(), title, content});
+      }
+      document.getElementById("promptModal").close();
+      renderPrompts();
+      saveConfigDirectly("promptStatus");
+    };
+
     function renderCameras() {
-      const list = document.getElementById("cameraList");
-      list.innerHTML = "";
+      const body = document.getElementById("cameraTableBody");
+      body.innerHTML = "";
       cameras = cameras.map(normalizeCamera);
       cameras.forEach((camera, index) => {
-        const row = document.createElement("div");
-        row.className = "camera-row";
-
-        const enabled = document.createElement("input");
-        enabled.type = "checkbox";
-        enabled.checked = camera.enabled;
-        enabled.addEventListener("change", () => cameras[index].enabled = enabled.checked);
-
-        const name = document.createElement("input");
-        name.placeholder = "bep";
-        name.value = camera.name;
-        name.addEventListener("input", () => {
-          cameras[index].name = name.value;
-          if (!cameras[index].go2rtc_src) {
-            cameras[index].go2rtc_src = name.value.trim();
-            go2rtcSrc.value = cameras[index].go2rtc_src;
-          }
-        });
-
-        const rtsp = document.createElement("input");
-        rtsp.placeholder = "rtsp://10.10.0.2:8554/bep_sub";
-        rtsp.value = camera.rtsp_url;
-        rtsp.addEventListener("input", () => {
-          cameras[index].rtsp_url = rtsp.value;
-          const streamName = streamNameFromRtsp(rtsp.value);
-          if (streamName) {
-            if (!cameras[index].name) {
-              cameras[index].name = streamName;
-              name.value = streamName;
-            }
-            if (!cameras[index].go2rtc_src) {
-              cameras[index].go2rtc_src = streamName;
-              go2rtcSrc.value = streamName;
-            }
-          }
-        });
-
-        const go2rtcSrc = document.createElement("input");
-        go2rtcSrc.placeholder = "bep";
-        go2rtcSrc.value = camera.go2rtc_src;
-        go2rtcSrc.addEventListener("input", () => cameras[index].go2rtc_src = go2rtcSrc.value);
-
-        const liveUrl = document.createElement("input");
-        liveUrl.placeholder = "Optional direct stream.html URL";
-        liveUrl.value = camera.live_url;
-        liveUrl.addEventListener("input", () => cameras[index].live_url = liveUrl.value);
-
-        const actions = document.createElement("div");
-        actions.className = "camera-actions";
-        const snapshot = document.createElement("button");
-        snapshot.type = "button";
-        snapshot.textContent = "Snapshot";
-        snapshot.addEventListener("click", () => showViewer(
+        const promptObj = prompts.find(p => p.id === camera.prompt_id);
+        const promptName = promptObj ? promptObj.title : "Global Fallback";
+        
+        const tr = document.createElement("tr");
+        tr.style.borderBottom = "1px solid var(--line)";
+        tr.innerHTML = `
+          <td style="padding: 10px; text-align: center;">
+            <input type="checkbox" ${camera.enabled ? "checked" : ""} class="cam-toggle">
+          </td>
+          <td style="padding: 10px;">${camera.name || "-"}</td>
+          <td style="padding: 10px; word-break: break-all; font-size: 13px;">${camera.rtsp_url || "-"}</td>
+          <td style="padding: 10px;">${camera.go2rtc_src || "-"}</td>
+          <td style="padding: 10px; word-break: break-all; font-size: 13px;">${camera.live_url || "-"}</td>
+          <td style="padding: 10px;">${promptName}</td>
+          <td style="padding: 10px; text-align: right; white-space: nowrap;">
+            <button class="cam-snapshot" style="margin-right: 4px;">Snap</button>
+            <button class="cam-test" style="margin-right: 4px;">Test</button>
+            <button class="cam-edit" style="margin-right: 4px;">Edit</button>
+            <button class="danger cam-remove">Del</button>
+          </td>
+        `;
+        
+        tr.querySelector(".cam-toggle").onchange = (e) => {
+          cameras[index].enabled = e.target.checked;
+          saveConfigDirectly("cameraStatus");
+        };
+        
+        tr.querySelector(".cam-snapshot").onclick = () => showViewer(
           `Snapshot: ${camera.name || "Camera " + (index + 1)}`,
           cameraSnapshotSource(cameras[index], index),
           "snapshot"
-        ));
-        const test = document.createElement("button");
-        test.type = "button";
-        test.textContent = "Test AI";
-        test.addEventListener("click", async () => {
-          const label = camera.name || `Camera ${index + 1}`;
-          setStatus("cameraStatus", `Testing ${label}: capture snapshot and verify AI...`, "warn");
-          test.disabled = true;
-          test.textContent = "Testing...";
+        );
+        
+        const testBtn = tr.querySelector(".cam-test");
+        testBtn.onclick = async () => {
+          const label = camera.name || \`Camera \${index + 1}\`;
+          setStatus("cameraStatus", \`Testing \${label}: capture snapshot and verify AI...\`, "warn");
+          testBtn.disabled = true;
           try {
-            const data = await api(`/api/test-ai-camera?index=${index}`, {method: "POST", timeout: 150000});
+            const data = await api(\`/api/test-ai-camera?index=\${index}\`, {method: "POST", timeout: 150000});
             document.getElementById("toolResult").textContent = JSON.stringify(data, null, 2);
-            setStatus("cameraStatus", `Test ${data.camera || label}: ${data.result || "complete"}`, "ok");
+            setStatus("cameraStatus", \`Test \${data.camera || label}: \${data.result || "complete"}\`, "ok");
+            showTab("toolsPanel");
           } catch (err) {
-            setStatus("cameraStatus", `Test ${label} failed: ${err.message}`, "err");
+            setStatus("cameraStatus", \`Test \${label} failed: \${err.message}\`, "err");
           } finally {
-            test.disabled = false;
-            test.textContent = "Test AI";
+            testBtn.disabled = false;
           }
-        });
-        const remove = document.createElement("button");
-        remove.type = "button";
-        remove.className = "danger";
-        remove.textContent = "Remove";
-        remove.addEventListener("click", () => {
+        };
+
+        tr.querySelector(".cam-edit").onclick = () => openCameraModal(index);
+        tr.querySelector(".cam-remove").onclick = () => {
           cameras.splice(index, 1);
           renderCameras();
-          renderLive();
-        });
-        actions.append(snapshot, test, remove);
-        row.append(enabled, name, rtsp, go2rtcSrc, liveUrl, actions);
-        list.append(row);
+          saveConfigDirectly("cameraStatus");
+        };
+
+        body.appendChild(tr);
       });
+      renderLive();
+    }
+
+    function openCameraModal(index = -1) {
+      editingCameraIndex = index;
+      const modal = document.getElementById("cameraModal");
+      document.getElementById("cameraModalTitle").textContent = index >= 0 ? "Edit Camera" : "Add Camera";
+      
+      const cam = index >= 0 ? cameras[index] : {enabled: true, name: "", rtsp_url: "", go2rtc_src: "", live_url: "", prompt_id: ""};
+      document.getElementById("modalCamEnabled").checked = cam.enabled;
+      document.getElementById("modalCamName").value = cam.name;
+      document.getElementById("modalCamRtsp").value = cam.rtsp_url;
+      document.getElementById("modalCamGo2rtc").value = cam.go2rtc_src;
+      document.getElementById("modalCamLive").value = cam.live_url;
+      document.getElementById("modalCamPrompt").value = cam.prompt_id || "";
+      modal.showModal();
+    }
+
+    document.getElementById("addCameraBtn").onclick = () => openCameraModal(-1);
+    document.getElementById("modalCamCancelBtn").onclick = () => document.getElementById("cameraModal").close();
+    document.getElementById("modalCamSaveBtn").onclick = () => {
+      const cam = {
+        enabled: document.getElementById("modalCamEnabled").checked,
+        name: document.getElementById("modalCamName").value.trim(),
+        rtsp_url: document.getElementById("modalCamRtsp").value.trim(),
+        go2rtc_src: document.getElementById("modalCamGo2rtc").value.trim(),
+        live_url: document.getElementById("modalCamLive").value.trim(),
+        prompt_id: document.getElementById("modalCamPrompt").value
+      };
+      if (!cam.name && !cam.rtsp_url) return alert("Name or RTSP URL is required");
+      
+      if (editingCameraIndex >= 0) cameras[editingCameraIndex] = cam;
+      else cameras.push(cam);
+      
+      document.getElementById("cameraModal").close();
+      renderCameras();
+      saveConfigDirectly("cameraStatus");
+    };
+
+    async function saveConfigDirectly(statusId) {
+      try {
+        const data = await api("/api/config", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(collectConfig())
+        });
+        renderConfig(data.config);
+        setStatus(statusId, data.message || "Saved", "ok");
+      } catch (err) {
+        setStatus(statusId, err.message, "err");
+      }
     }
     function renderLive() {
       const grid = document.getElementById("liveGrid");

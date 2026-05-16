@@ -150,7 +150,7 @@ def process_camera_verification(
     ai_description = ""
     raw = ""
     try:
-        ai_result, ai_description, raw = verify_scene(image_path, config)
+        ai_result, ai_description, raw = verify_scene(image_path, config, camera)
         set_state(last_ai_result=ai_result, last_verify_at=now_iso(), last_error="", last_camera=camera_name)
         insert_event(
             event_source,
@@ -305,7 +305,7 @@ def _monitor_loop(config: dict[str, Any]) -> None:
                         cv2.imwrite(str(verify_path), frame)
                         cv2.imwrite(str(SNAPSHOT_PATH), frame)
                         try:
-                            ai_result, ai_description, raw = verify_scene(verify_path, config)
+                            ai_result, ai_description, raw = verify_scene(verify_path, config, camera)
                             last_verify[index] = now
                             set_state(last_ai_result=ai_result, last_verify_at=now_iso(), last_error="")
                             insert_event(

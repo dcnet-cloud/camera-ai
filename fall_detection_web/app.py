@@ -232,7 +232,7 @@ async def test_ai(_: str = Depends(auth.require_auth)):
         path = monitor.SNAPSHOT_PATH
         if not path.exists():
             monitor.capture_snapshot(c, path)
-        result, desc, raw = ai.verify_scene(path, c)
+        result, desc, raw = ai.verify_scene(path, c, camera=None)
         return {"success": True, "result": result, "description": desc, "raw": raw}
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -241,8 +241,9 @@ async def test_ai(_: str = Depends(auth.require_auth)):
 async def test_ai_camera(index: int, _: str = Depends(auth.require_auth)):
     try:
         c = config.read_config()
+        camera = config.get_camera(c, index)
         path = monitor.capture_camera_snapshot(c, index)
-        result, desc, raw = ai.verify_scene(path, c)
+        result, desc, raw = ai.verify_scene(path, c, camera=camera)
         camera_name = str(config.get_camera(c, index).get("name", f"Camera {index}"))
         return {"success": True, "camera": camera_name, "result": result, "description": desc, "raw": raw}
     except Exception as exc:
@@ -275,7 +276,7 @@ async def test_ai_upload(request: Request, _: str = Depends(auth.require_auth)):
         test_path.write_bytes(content)
         
         c = config.read_config()
-        result, desc, raw = ai.verify_scene(test_path, c)
+        result, desc, raw = ai.verify_scene(test_path, c, camera=None)
         return {"success": True, "result": result, "description": desc, "raw": raw}
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))

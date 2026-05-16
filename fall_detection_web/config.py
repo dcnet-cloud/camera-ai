@@ -42,6 +42,7 @@ Mô tả dưới 20 ký tự
 DEFAULT_CONFIG: dict[str, Any] = {
     "rtsp_url": "",
     "go2rtc_url": "",
+    "prompts": [],          # stored as JSON string
     "cameras": [],          # stored as JSON string
     "telegram_bot_token": "",
     "telegram_chat_id": "",
@@ -148,7 +149,7 @@ def _coerce(key: str, value: Any) -> Any:
         return clamp_float(value, 0.01, 1.0, key)
     if key == "loop_sleep":
         return max(0.0, float(value))
-    if key == "cameras":
+    if key in ("cameras", "prompts"):
         if isinstance(value, list):
             return value
         try:
@@ -223,12 +224,36 @@ def normalize_cameras(config: dict[str, Any]) -> list[dict[str, Any]]:
             "rtsp_url": str(cam.get("rtsp_url", "")).strip(),
             "go2rtc_src": str(cam.get("go2rtc_src", "")).strip(),
             "live_url": str(cam.get("live_url", "")).strip(),
+            "prompt_id": str(cam.get("prompt_id", "")).strip(),
         })
     # Fallback: top-level rtsp_url → single default camera
     fallback = str(config.get("rtsp_url", "")).strip()
     if not cameras and fallback:
-        cameras.append({"enabled": True, "name": "Default", "rtsp_url": fallback, "go2rtc_src": "", "live_url": ""})
+        cameras.append({"enabled": True, "name": "Default", "rtsp_url": fallback, "go2rtc_src": "", "live_url": "", "prompt_id": ""})
     return cameras
+
+
+def normalize_prompts(config: dict[str, Any]) -> list[dict[str, Any]]:
+    raw = config.get("prompts", [])
+    if not isinstance(raw, list):
+        try:
+            raw = json.loads(raw)
+        except Exception:
+            raw = []
+    prompts: list[dict[str, Any]] = []
+    for p in raw:
+        if not isinstance(p, dict):
+            continue
+        # Ensure it has an id, title, and content
+        if not str(p.get("id", "")).strip():
+            import uuid
+            p["id"] = str(uuid.uuid4())
+        prompts.append({
+            "id": str(p.get("id", "")).strip(),
+            "title": str(p.get("title", "")).strip(),
+            "content": str(p.get("content", "")).strip()
+        })
+    return prompts
 
 
 def read_config() -> dict[str, Any]:
@@ -249,6 +274,7 @@ def read_config() -> dict[str, Any]:
 
     # Normalize
     config["cameras"] = normalize_cameras(config)
+    config["prompts"] = normalize_prompts(config)
     config["detection_mode"] = "yolo"
     return config
 
@@ -268,6 +294,7 @@ def write_config(new_config: dict[str, Any]) -> dict[str, Any]:
     clean["yolo_imgsz"] = positive_int(clean["yolo_imgsz"], "yolo_imgsz")
     clean["loop_sleep"] = max(0.0, float(clean["loop_sleep"]))
     clean["cameras"] = normalize_cameras(clean)
+    clean["prompts"] = normalize_prompts(clean)
     clean["detection_mode"] = "yolo"
 
     # Don't overwrite keys that are currently supplied by env (avoid empty overwrite)
