@@ -831,6 +831,8 @@
     let eventsCurrentPage = 1;
     let eventsTotalPages = 1;
     let liveLayout = "2";
+    const EVENTS_PAGE_LIMIT = 25;
+    let eventImageObserver = null;
     const numericIds = [
       "confidence", "verify_interval", "alert_cooldown", "frame_skip", "loop_sleep", "yolo_imgsz",
       "teldrive_record_seconds", "teldrive_record_cooldown"
@@ -879,6 +881,7 @@
       document.querySelectorAll(".tab-btn").forEach(btn => btn.classList.toggle("active", btn.dataset.tab === id));
       const tabName = id.replace("Panel", "");
       if (location.hash !== `#${tabName}`) history.replaceState(null, "", `#${tabName}`);
+      if (id === "eventsPanel") hydrateEventImages();
     }
     function collectConfig() {
       const data = {};
@@ -950,7 +953,7 @@
       
       eventsCurrentPage = data.page || 1;
       const total = data.total || 0;
-      const limit = data.limit || 50;
+      const limit = data.limit || EVENTS_PAGE_LIMIT;
       eventsTotalPages = Math.ceil(total / limit) || 1;
       
       document.getElementById("prevPageBtn").disabled = eventsCurrentPage <= 1;
@@ -977,7 +980,9 @@
               const img = document.createElement("img");
               img.className = "event-thumb";
               img.alt = event.camera || event.status || "event";
-              img.src = event.image_url;
+              img.loading = "lazy";
+              img.decoding = "async";
+              img.dataset.src = event.image_url;
               img.addEventListener("click", () => showViewer(
                 `Event: ${event.camera || event.status || "image"}`,
                 event.image_url,
@@ -995,7 +1000,33 @@
         body.append(row);
       }
       setStatus("eventsStatus", `Loaded ${events.length} events`, "ok");
+      hydrateEventImages();
       renderDashboard();
+    }
+    function hydrateEventImages() {
+      const panel = document.getElementById("eventsPanel");
+      if (!panel || panel.classList.contains("hidden")) return;
+      const images = panel.querySelectorAll("img.event-thumb[data-src]");
+      if (!images.length) return;
+      if (!("IntersectionObserver" in window)) {
+        images.forEach(img => {
+          img.src = img.dataset.src;
+          delete img.dataset.src;
+        });
+        return;
+      }
+      if (!eventImageObserver) {
+        eventImageObserver = new IntersectionObserver((entries) => {
+          entries.forEach(entry => {
+            if (!entry.isIntersecting) return;
+            const img = entry.target;
+            img.src = img.dataset.src;
+            delete img.dataset.src;
+            eventImageObserver.unobserve(img);
+          });
+        }, {rootMargin: "160px 0px"});
+      }
+      images.forEach(img => eventImageObserver.observe(img));
     }
     function formatLocalTime(value) {
       if (!value) return "";
@@ -1098,7 +1129,7 @@
       try {
         const camera = document.getElementById("eventFilterCamera") ? document.getElementById("eventFilterCamera").value : "";
         const aiResult = document.getElementById("eventFilterAI") ? document.getElementById("eventFilterAI").value : "";
-        const data = await api(`/api/events?page=${eventsCurrentPage}&limit=50&camera=${encodeURIComponent(camera)}&ai_result=${encodeURIComponent(aiResult)}`, {timeout: 10000});
+        const data = await api(`/api/events?page=${eventsCurrentPage}&limit=${EVENTS_PAGE_LIMIT}&camera=${encodeURIComponent(camera)}&ai_result=${encodeURIComponent(aiResult)}`, {timeout: 10000});
         renderEvents(data);
       } catch(err) {
         setStatus("eventsStatus", err.message, "err");

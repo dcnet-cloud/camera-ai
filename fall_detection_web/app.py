@@ -6,6 +6,7 @@ import logging
 import secrets
 import psutil
 from contextlib import asynccontextmanager
+from email.utils import formatdate, parsedate_to_datetime
 from pathlib import Path
 from typing import Any
 
@@ -128,17 +129,35 @@ async def index_page(request: Request, _: str = Depends(auth.require_auth)):
 
 
 @app.get("/api/event-image/{filename}")
-async def event_image(filename: str, _: str = Depends(auth.require_auth)):
+async def event_image(request: Request, filename: str, _: str = Depends(auth.require_auth)):
     safe_name = Path(filename).name
     if safe_name != filename or not safe_name.lower().endswith(".jpg"):
         raise HTTPException(status_code=404, detail="Image not found")
     path = db.EVENT_IMAGES_DIR / safe_name
     if not path.exists() or not path.is_file():
         raise HTTPException(status_code=404, detail="Image not found")
+    stat = path.stat()
+    etag = f'W/"{stat.st_mtime_ns:x}-{stat.st_size:x}"'
+    last_modified = formatdate(stat.st_mtime, usegmt=True)
+    headers = {
+        "Cache-Control": "private, max-age=86400, immutable",
+        "ETag": etag,
+        "Last-Modified": last_modified,
+    }
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=headers)
+    if_modified_since = request.headers.get("if-modified-since")
+    if if_modified_since:
+        try:
+            since = parsedate_to_datetime(if_modified_since)
+            if since.timestamp() >= int(stat.st_mtime):
+                return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=headers)
+        except (TypeError, ValueError, OSError):
+            pass
     return FileResponse(
         path,
         media_type="image/jpeg",
-        headers={"Cache-Control": "private, no-store"},
+        headers=headers,
     )
 
 
