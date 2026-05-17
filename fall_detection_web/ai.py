@@ -172,20 +172,9 @@ def parse_ai_verdict(content: str) -> tuple[str, str, str]:
 # Main calls
 # ──────────────────────────────────────────────
 
-def verify_scene(image_path: Path, config: dict[str, Any], camera: dict[str, Any] | None = None) -> tuple[str, str, str]:
-    require_config(config, ["ai_api_key", "ai_base_url", "vision_model"])
-    
-    prompt_text = str(config.get("verify_prompt", ""))
-    if camera and camera.get("prompt_id"):
-        for p in config.get("prompts", []):
-            if p.get("id") == camera.get("prompt_id"):
-                prompt_text = str(p.get("content", prompt_text))
-                break
-
-    prompt_text = prompt_text.strip() or "Please analyze this image."
-
+def _call_vision_api(model_name: str, prompt_text: str, image_path: Path, config: dict[str, Any]) -> tuple[str, str, str]:
     payload = {
-        "model": config["vision_model"],
+        "model": model_name,
         "messages": [
             {
                 "role": "user",
@@ -202,21 +191,46 @@ def verify_scene(image_path: Path, config: dict[str, Any], camera: dict[str, Any
         "Authorization": f"Bearer {config['ai_api_key']}",
         "Content-Type": "application/json",
     }
-    logger.info("[AI] verifying scene image=%s", image_path.name)
+    
     t0 = time.monotonic()
     response = _session.post(chat_url(config), headers=headers, json=payload, timeout=120)
     latency = time.monotonic() - t0
+    
     try:
         response.raise_for_status()
     except requests.exceptions.HTTPError as exc:
         err_msg = response.text.strip()
-        logger.error("[AI] HTTP Error %s: %s", response.status_code, err_msg)
+        logger.error("[AI] HTTP Error %s (Model: %s): %s", response.status_code, model_name, err_msg)
         raise RuntimeError(f"{response.status_code} Error: {short_text(err_msg, 100)}") from exc
     
     content = response_ai_content(response)
     result, description, raw = parse_ai_verdict(content)
     logger.info("[AI] latency=%.2fs result=%s description=%r", latency, result, description)
     return result, description, raw
+
+def verify_scene(image_path: Path, config: dict[str, Any], camera: dict[str, Any] | None = None) -> tuple[str, str, str]:
+    require_config(config, ["ai_api_key", "ai_base_url", "vision_model"])
+    
+    prompt_text = str(config.get("verify_prompt", ""))
+    if camera and camera.get("prompt_id"):
+        for p in config.get("prompts", []):
+            if p.get("id") == camera.get("prompt_id"):
+                prompt_text = str(p.get("content", prompt_text))
+                break
+
+    prompt_text = prompt_text.strip() or "Please analyze this image."
+    primary_model = str(config["vision_model"]).strip()
+    fallback_model = str(config.get("fallback_vision_model", "")).strip()
+
+    logger.info("[AI] verifying scene image=%s", image_path.name)
+    
+    try:
+        return _call_vision_api(primary_model, prompt_text, image_path, config)
+    except RuntimeError as exc:
+        if fallback_model and fallback_model != primary_model:
+            logger.warning("[AI] Primary model %s failed, retrying with fallback %s. Error: %s", primary_model, fallback_model, exc)
+            return _call_vision_api(fallback_model, prompt_text, image_path, config)
+        raise
 
 
 def send_telegram(photo_path: Path, message: str, config: dict[str, Any]) -> None:

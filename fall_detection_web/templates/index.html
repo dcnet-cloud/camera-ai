@@ -497,11 +497,15 @@
             <input id="ai_base_url" autocomplete="off" placeholder="https://9router.minhhungtsbd.me/v1">
           </div>
           <div>
-            <label for="vision_model">AI Model</label>
-            <input id="vision_model" autocomplete="off" placeholder="gh/oswe-vscode-prime">
+            <label for="vision_model">Vision Model</label>
+            <input id="vision_model" placeholder="gpt-4o">
           </div>
-          <div class="full">
-            <label for="verify_prompt">AI Verify Prompt</label>
+          <div>
+            <label for="fallback_vision_model">Fallback Vision Model (optional)</label>
+            <input id="fallback_vision_model" placeholder="gpt-4o-mini">
+          </div>
+          <div style="grid-column: 1 / -1;">
+            <label for="verify_prompt">Verify Prompt (System Prompt)</label>
             <textarea id="verify_prompt" placeholder="Prompt xác minh té ngã gửi tới AI"></textarea>
           </div>
           <div>
@@ -708,7 +712,7 @@
     let eventsTotalPages = 1;
     const numericIds = ["confidence", "verify_interval", "alert_cooldown", "frame_skip", "loop_sleep", "yolo_imgsz"];
     const configIds = [
-      "ai_base_url", "ai_api_key", "vision_model", "verify_prompt", "detection_mode", "yolo_model",
+      "ai_base_url", "ai_api_key", "vision_model", "fallback_vision_model", "verify_prompt", "detection_mode", "yolo_model",
       "telegram_bot_token", "telegram_chat_id", "webhook_token", ...numericIds
     ];
 

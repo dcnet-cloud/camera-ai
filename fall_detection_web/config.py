@@ -49,6 +49,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "ai_base_url": "https://9router.minhhungtsbd.me/v1",
     "ai_api_key": "",
     "vision_model": "gh/oswe-vscode-prime",
+    "fallback_vision_model": "",
     "verify_prompt": DEFAULT_VERIFY_PROMPT,
     "detection_mode": "yolo",
     "yolo_model": "yolov8n.pt",
