@@ -209,7 +209,7 @@ def _prune_events(conn: sqlite3.Connection) -> None:
         logger.info("[DB] Pruned %d old events", to_delete)
 
 
-def insert_event(status_name: str, image_path: Path | None = None, **fields: Any) -> None:
+def insert_event(status_name: str, image_path: Path | None = None, **fields: Any) -> str:
     image_file = save_event_image(image_path, status_name)
     t = now_iso()
     t_local = local_iso()
@@ -232,6 +232,7 @@ def insert_event(status_name: str, image_path: Path | None = None, **fields: Any
             ),
         )
         _prune_events(conn)
+    return image_file
 
 
 def get_events(

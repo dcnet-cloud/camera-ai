@@ -13,11 +13,13 @@ import requests
 from ai import send_telegram, verify_scene
 from config import get_camera, normalize_cameras, require_config
 from db import insert_event, now_iso
+import teldrive
 
 logger = logging.getLogger("fall_detection_web")
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
 SNAPSHOT_PATH = DATA_DIR / "latest.jpg"
+CLIPS_DIR = DATA_DIR / "event_clips"
 
 state_lock = threading.Lock()
 stop_event = threading.Event()
@@ -68,6 +70,83 @@ def capture_rtsp_snapshot(rtsp_url: str, output_path: Path) -> Path:
     finally:
         cap.release()
     return output_path
+
+
+def log_event(config: dict[str, Any], status_name: str, image_path: Path | None = None, **fields: Any) -> None:
+    image_file = insert_event(status_name, image_path=image_path, **fields)
+    if image_file and teldrive.enabled(config):
+        camera_name = str(fields.get("camera", "Camera") or "Camera")
+        stored_path = DATA_DIR / "event_images" / image_file
+        threading.Thread(
+            target=upload_event_image_safe,
+            args=(config.copy(), stored_path, camera_name),
+            daemon=True,
+        ).start()
+
+
+def upload_event_image_safe(config: dict[str, Any], image_path: Path, camera_name: str) -> None:
+    try:
+        teldrive.upload_event_image(config, image_path, camera_name)
+    except Exception as exc:
+        logger.warning("[TELDRIVE] image upload failed camera=%s: %s", camera_name, exc)
+        insert_event("teldrive_image_error", camera=camera_name, error=str(exc))
+
+
+def upload_event_video_safe(config: dict[str, Any], video_path: Path, camera_name: str) -> None:
+    try:
+        teldrive.upload_event_video(config, video_path, camera_name)
+        insert_event("teldrive_video_uploaded", camera=camera_name, message=video_path.name)
+    except Exception as exc:
+        logger.warning("[TELDRIVE] video upload failed camera=%s: %s", camera_name, exc)
+        insert_event("teldrive_video_error", camera=camera_name, error=str(exc))
+
+
+def record_and_upload_clip(
+    config: dict[str, Any],
+    camera: dict[str, Any],
+    holder: dict[str, Any],
+    lock: threading.Lock,
+) -> None:
+    import cv2
+
+    camera_name = str(camera["name"])
+    seconds = int(config.get("teldrive_record_seconds", 10))
+    fps = 8.0
+    deadline = time.time() + seconds
+    writer = None
+    path: Path | None = None
+    last_seq = -1
+
+    try:
+        CLIPS_DIR.mkdir(parents=True, exist_ok=True)
+        stamp = time.strftime("%Y%m%dT%H%M%S")
+        safe_camera = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in camera_name) or "camera"
+        path = CLIPS_DIR / f"{stamp}_{safe_camera}.avi"
+
+        while time.time() < deadline and not stop_event.is_set():
+            with lock:
+                frame = holder.get("frame")
+                seq = int(holder.get("seq", 0))
+            if frame is None or seq == last_seq:
+                time.sleep(0.05)
+                continue
+            last_seq = seq
+            if writer is None:
+                height, width = frame.shape[:2]
+                fourcc = cv2.VideoWriter_fourcc(*"MJPG")
+                writer = cv2.VideoWriter(str(path), fourcc, fps, (width, height))
+            writer.write(frame)
+            time.sleep(1.0 / fps)
+    except Exception as exc:
+        logger.warning("[RECORD] failed camera=%s: %s", camera_name, exc)
+        insert_event("record_error", camera=camera_name, error=str(exc))
+        return
+    finally:
+        if writer is not None:
+            writer.release()
+
+    if path and path.exists() and path.stat().st_size > 0:
+        upload_event_video_safe(config, path, camera_name)
 
 
 def capture_snapshot(config: dict[str, Any], output_path: Path = SNAPSHOT_PATH) -> Path:
@@ -151,7 +230,8 @@ def process_camera_verification(
     try:
         ai_result, ai_description, raw = verify_scene(image_path, config, camera)
         set_state(last_ai_result=ai_result, last_verify_at=now_iso(), last_error="", last_camera=camera_name)
-        insert_event(
+        log_event(
+            config,
             event_source,
             image_path=image_path,
             camera=camera_name,
@@ -163,7 +243,7 @@ def process_camera_verification(
         )
     except Exception as exc:
         set_state(last_error=str(exc), last_verify_at=now_iso(), last_camera=camera_name)
-        insert_event("ai_error", image_path=image_path, camera=camera_name, confidence=confidence, error=str(exc))
+        log_event(config, "ai_error", image_path=image_path, camera=camera_name, confidence=confidence, error=str(exc))
         return {"success": False, "camera": camera_name, "error": str(exc), "result": ai_result}
 
     if ai_result == "EMERGENCY":
@@ -177,12 +257,12 @@ def process_camera_verification(
                 )
                 last_alert[alert_key] = now
                 set_state(last_alert_at=now_iso())
-                insert_event("telegram_sent", image_path=image_path, camera=camera_name, confidence=confidence, ai_result=ai_result)
+                log_event(config, "telegram_sent", image_path=image_path, camera=camera_name, confidence=confidence, ai_result=ai_result)
             except Exception as exc:
                 set_state(last_error=str(exc), last_camera=camera_name)
-                insert_event("telegram_error", image_path=image_path, camera=camera_name, confidence=confidence, error=str(exc))
+                log_event(config, "telegram_error", image_path=image_path, camera=camera_name, confidence=confidence, error=str(exc))
         else:
-            insert_event("cooldown", image_path=image_path, camera=camera_name, confidence=confidence, ai_result=ai_result)
+            log_event(config, "cooldown", image_path=image_path, camera=camera_name, confidence=confidence, ai_result=ai_result)
 
     return {
         "success": True,
@@ -253,6 +333,7 @@ def _monitor_loop(config: dict[str, Any]) -> None:
     last_seen_seq = [0 for _ in cameras]
     last_verify = [0.0 for _ in cameras]
     last_alert: dict[int | str, float] = {index: 0.0 for index in range(len(cameras))}
+    last_record = [0.0 for _ in cameras]
     total_frames = 0
     set_state(running=True, started_at=now_iso(), last_error="", mode="yolo")
     for thread in capture_threads:
@@ -297,6 +378,17 @@ def _monitor_loop(config: dict[str, Any]) -> None:
                 if person_detected:
                     set_state(last_person_confidence=best_confidence, last_error="", last_camera=camera_name)
                     logger.info("[PERSON] camera=%s confidence=%.2f", camera_name, best_confidence)
+                    if (
+                        teldrive.enabled(config)
+                        and config.get("teldrive_record_enabled")
+                        and now - last_record[index] > float(config.get("teldrive_record_cooldown", 300))
+                    ):
+                        last_record[index] = now
+                        threading.Thread(
+                            target=record_and_upload_clip,
+                            args=(config.copy(), camera.copy(), frame_holders[index], frame_locks[index]),
+                            daemon=True,
+                        ).start()
                     
                     if now - last_verify[index] > float(config["verify_interval"]):
                         DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -307,7 +399,8 @@ def _monitor_loop(config: dict[str, Any]) -> None:
                             ai_result, ai_description, raw = verify_scene(verify_path, config, camera)
                             last_verify[index] = now
                             set_state(last_ai_result=ai_result, last_verify_at=now_iso(), last_error="")
-                            insert_event(
+                            log_event(
+                                config,
                                 "verified",
                                 image_path=verify_path,
                                 camera=camera_name,
@@ -320,7 +413,7 @@ def _monitor_loop(config: dict[str, Any]) -> None:
                         except Exception as exc:
                             last_verify[index] = now
                             set_state(last_error=str(exc), last_verify_at=now_iso())
-                            insert_event("ai_error", image_path=verify_path, camera=camera_name, confidence=best_confidence, error=str(exc))
+                            log_event(config, "ai_error", image_path=verify_path, camera=camera_name, confidence=best_confidence, error=str(exc))
                             ai_result = "SAFE"
 
                         if ai_result == "EMERGENCY":
@@ -333,12 +426,12 @@ def _monitor_loop(config: dict[str, Any]) -> None:
                                     )
                                     last_alert[index] = now
                                     set_state(last_alert_at=now_iso())
-                                    insert_event("telegram_sent", image_path=verify_path, camera=camera_name, confidence=best_confidence, ai_result=ai_result)
+                                    log_event(config, "telegram_sent", image_path=verify_path, camera=camera_name, confidence=best_confidence, ai_result=ai_result)
                                 except Exception as exc:
                                     set_state(last_error=str(exc))
-                                    insert_event("telegram_error", image_path=verify_path, camera=camera_name, confidence=best_confidence, error=str(exc))
+                                    log_event(config, "telegram_error", image_path=verify_path, camera=camera_name, confidence=best_confidence, error=str(exc))
                             else:
-                                insert_event("cooldown", image_path=verify_path, camera=camera_name, confidence=best_confidence, ai_result=ai_result)
+                                log_event(config, "cooldown", image_path=verify_path, camera=camera_name, confidence=best_confidence, ai_result=ai_result)
 
             time.sleep(float(config["loop_sleep"]))
     except Exception as exc:
@@ -391,4 +484,3 @@ def restart_monitor(config: dict[str, Any]) -> None:
         globals()["worker_thread"] = new_thread
         new_thread.start()
         insert_event("config_applied", message="Monitor restarted with new settings")
-

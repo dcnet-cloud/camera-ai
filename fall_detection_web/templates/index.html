@@ -108,6 +108,18 @@
       font-size: 12px;
       margin-bottom: 6px;
     }
+    .checkbox-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0;
+      color: var(--muted);
+      font-weight: 700;
+      font-size: 12px;
+    }
+    .checkbox-wrap input {
+      width: auto;
+    }
     input, textarea, select {
       width: 100%;
       border: 1px solid var(--line);
@@ -218,9 +230,11 @@
     }
     .live-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
       gap: 12px;
     }
+    .live-grid.cols-1 { grid-template-columns: 1fr; }
+    .live-grid.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .live-grid.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .live-card {
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -246,6 +260,33 @@
       border: 0;
       background: #03070b;
       display: block;
+    }
+    .dropdown {
+      position: relative;
+      display: inline-block;
+    }
+    .dropdown-menu {
+      position: absolute;
+      right: 0;
+      top: calc(100% + 6px);
+      min-width: 150px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 6px;
+      z-index: 20;
+      box-shadow: 0 10px 24px rgba(0,0,0,.35);
+    }
+    .dropdown-menu.hidden { display: none; }
+    .dropdown-menu button {
+      width: 100%;
+      border: 0;
+      text-align: left;
+      color: var(--text);
+      padding: 9px 10px;
+    }
+    .dropdown-menu button:hover {
+      background: var(--panel-2);
     }
     dialog {
       width: min(960px, calc(100vw - 28px));
@@ -331,6 +372,8 @@
       main { padding: 14px; }
       header { flex-direction: column; }
       .grid, .cards { grid-template-columns: 1fr; }
+      .live-grid.cols-2,
+      .live-grid.cols-3 { grid-template-columns: 1fr; }
       .summary-item { grid-template-columns: 1fr; }
       .camera-head { display: none; }
       .camera-row {
@@ -482,9 +525,14 @@
         <h2>Live Cameras</h2>
         <div class="actions">
           <button id="refreshLiveBtn" type="button">Refresh Live</button>
+          <select id="liveLayoutSelect" style="max-width:180px">
+            <option value="1">Full width</option>
+            <option value="2" selected>2 columns</option>
+            <option value="3">3 columns</option>
+          </select>
           <span id="liveStatus"></span>
         </div>
-        <div id="liveGrid" class="live-grid" style="margin-top:14px"></div>
+        <div id="liveGrid" class="live-grid cols-2" style="margin-top:14px"></div>
       </div>
     </section>
 
@@ -557,6 +605,45 @@
           <div>
             <label for="loop_sleep">Loop Sleep (seconds)</label>
             <input id="loop_sleep" type="number" min="0" step="0.1">
+          </div>
+          <div class="full">
+            <h2 style="margin-top: 10px;">Teldrive Storage</h2>
+          </div>
+          <label class="checkbox-wrap">
+            <input id="teldrive_enabled" type="checkbox">
+            Enable Teldrive upload
+          </label>
+          <label class="checkbox-wrap">
+            <input id="teldrive_upload_images" type="checkbox">
+            Upload event images
+          </label>
+          <label class="checkbox-wrap">
+            <input id="teldrive_record_enabled" type="checkbox">
+            Record and upload clip when person is detected
+          </label>
+          <div>
+            <label for="teldrive_base_url">Teldrive Base URL</label>
+            <input id="teldrive_base_url" autocomplete="off" placeholder="https://teldrive.minhhungtsbd.me">
+          </div>
+          <div>
+            <label for="teldrive_token">Teldrive Token</label>
+            <input id="teldrive_token" type="password" autocomplete="new-password">
+          </div>
+          <div>
+            <label for="teldrive_root_path">Teldrive Root Path</label>
+            <input id="teldrive_root_path" autocomplete="off" placeholder="/Fall Detection">
+          </div>
+          <div>
+            <label for="teldrive_channel_id">Teldrive Channel ID (optional)</label>
+            <input id="teldrive_channel_id" autocomplete="off">
+          </div>
+          <div>
+            <label for="teldrive_record_seconds">Record Seconds</label>
+            <input id="teldrive_record_seconds" type="number" min="1">
+          </div>
+          <div>
+            <label for="teldrive_record_cooldown">Record Cooldown (seconds)</label>
+            <input id="teldrive_record_cooldown" type="number" min="1">
           </div>
         </div>
         <div class="actions" style="margin-top:14px">
@@ -710,10 +797,16 @@
     let latestStatus = {};
     let eventsCurrentPage = 1;
     let eventsTotalPages = 1;
-    const numericIds = ["confidence", "verify_interval", "alert_cooldown", "frame_skip", "loop_sleep", "yolo_imgsz"];
+    let liveLayout = "2";
+    const numericIds = [
+      "confidence", "verify_interval", "alert_cooldown", "frame_skip", "loop_sleep", "yolo_imgsz",
+      "teldrive_record_seconds", "teldrive_record_cooldown"
+    ];
+    const checkboxIds = ["teldrive_enabled", "teldrive_upload_images", "teldrive_record_enabled"];
     const configIds = [
       "ai_base_url", "go2rtc_url", "ai_api_key", "vision_model", "fallback_vision_model", "verify_prompt", "detection_mode", "yolo_model",
-      "telegram_bot_token", "telegram_chat_id", ...numericIds
+      "telegram_bot_token", "telegram_chat_id", "teldrive_base_url", "teldrive_token", "teldrive_root_path", "teldrive_channel_id",
+      ...numericIds, ...checkboxIds
     ];
 
     function setText(id, value) {
@@ -757,7 +850,13 @@
     function collectConfig() {
       const data = {};
       for (const id of configIds) {
-        const raw = document.getElementById(id).value.trim();
+        const el = document.getElementById(id);
+        if (!el) continue;
+        if (checkboxIds.includes(id)) {
+          data[id] = el.checked;
+          continue;
+        }
+        const raw = el.value.trim();
         data[id] = numericIds.includes(id) ? Number(raw) : raw;
       }
       data.cameras = cameras;
@@ -767,7 +866,9 @@
     function renderConfig(config) {
       for (const id of configIds) {
         if (config[id] !== undefined && document.getElementById(id)) {
-          document.getElementById(id).value = config[id];
+          const el = document.getElementById(id);
+          if (checkboxIds.includes(id)) el.checked = Boolean(config[id]);
+          else el.value = config[id];
         }
       }
       cameras = Array.isArray(config.cameras) ? config.cameras : [];
@@ -1090,12 +1191,26 @@
           <td style="padding: 10px; word-break: break-all; font-size: 13px;">${camera.live_url || "-"}</td>
           <td style="padding: 10px;">${promptName}</td>
           <td style="padding: 10px; text-align: right; white-space: nowrap;">
-            <button class="cam-snapshot" style="margin-right: 4px;">Snap</button>
-            <button class="cam-test" style="margin-right: 4px;">Test</button>
-            <button class="cam-edit" style="margin-right: 4px;">Edit</button>
-            <button class="danger cam-remove">Del</button>
+            <div class="dropdown">
+              <button class="cam-menu" type="button">Actions</button>
+              <div class="dropdown-menu hidden">
+                <button class="cam-snapshot" type="button">Snapshot</button>
+                <button class="cam-test" type="button">Test AI</button>
+                <button class="cam-edit" type="button">Edit</button>
+                <button class="cam-remove" type="button">Delete</button>
+              </div>
+            </div>
           </td>
         `;
+        const menuBtn = tr.querySelector(".cam-menu");
+        const menu = tr.querySelector(".dropdown-menu");
+        menuBtn.onclick = (event) => {
+          event.stopPropagation();
+          document.querySelectorAll(".dropdown-menu").forEach(item => {
+            if (item !== menu) item.classList.add("hidden");
+          });
+          menu.classList.toggle("hidden");
+        };
         
         tr.querySelector(".cam-toggle").onchange = (e) => {
           cameras[index].enabled = e.target.checked;
@@ -1127,6 +1242,7 @@
 
         tr.querySelector(".cam-edit").onclick = () => openCameraModal(index);
         tr.querySelector(".cam-remove").onclick = () => {
+          menu.classList.add("hidden");
           cameras.splice(index, 1);
           renderCameras();
           saveConfigDirectly("cameraStatus");
@@ -1202,6 +1318,7 @@
     function renderLive() {
       const grid = document.getElementById("liveGrid");
       grid.innerHTML = "";
+      grid.className = `live-grid cols-${liveLayout}`;
       const visible = cameras
         .map((camera, index) => ({camera: normalizeCamera(camera), index}))
         .filter(item => item.camera.enabled && (item.camera.rtsp_url.trim() || item.camera.live_url.trim() || cameraLiveUrl(item.camera)));
@@ -1210,6 +1327,16 @@
         const index = item.index;
         const card = document.createElement("div");
         card.className = "live-card";
+        card.ondblclick = () => {
+          if (liveLayout !== "1") {
+            liveLayout = "1";
+            document.getElementById("liveLayoutSelect").value = "1";
+            renderLive();
+            const selected = document.querySelector(`[data-live-index="${index}"]`);
+            if (selected) selected.scrollIntoView({behavior: "smooth", block: "start"});
+          }
+        };
+        card.dataset.liveIndex = String(index);
         const title = document.createElement("h3");
         title.textContent = camera.name || camera.rtsp_url;
         const source = cameraVideoSource(camera, index);
@@ -1236,6 +1363,9 @@
     }
 
     document.querySelectorAll(".tab-btn").forEach(btn => btn.addEventListener("click", () => showTab(btn.dataset.tab)));
+    document.addEventListener("click", () => {
+      document.querySelectorAll(".dropdown-menu").forEach(item => item.classList.add("hidden"));
+    });
     document.getElementById("saveConfigBtn").addEventListener("click", async () => {
       try {
         const data = await api("/api/config", {
@@ -1298,6 +1428,10 @@
       }
     });
     document.getElementById("refreshStatusBtn").addEventListener("click", loadStatus);
+    document.getElementById("liveLayoutSelect").addEventListener("change", event => {
+      liveLayout = event.target.value;
+      renderLive();
+    });
     document.getElementById("saveCamerasBtn").addEventListener("click", async () => {
       try {
         const data = await api("/api/config", {

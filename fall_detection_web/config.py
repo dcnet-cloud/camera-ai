@@ -59,6 +59,15 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "alert_cooldown": 300,
     "frame_skip": 2,
     "loop_sleep": 0.3,
+    "teldrive_enabled": False,
+    "teldrive_base_url": "https://teldrive.minhhungtsbd.me",
+    "teldrive_token": "",
+    "teldrive_root_path": "/Fall Detection",
+    "teldrive_channel_id": "",
+    "teldrive_upload_images": True,
+    "teldrive_record_enabled": False,
+    "teldrive_record_seconds": 10,
+    "teldrive_record_cooldown": 300,
     "jwt_secret": "",
 }
 
@@ -78,12 +87,22 @@ ENV_CONFIG_KEYS: dict[str, str] = {
     "ALERT_COOLDOWN": "alert_cooldown",
     "FRAME_SKIP": "frame_skip",
     "LOOP_SLEEP": "loop_sleep",
+    "TELDRIVE_ENABLED": "teldrive_enabled",
+    "TELDRIVE_BASE_URL": "teldrive_base_url",
+    "TELDRIVE_TOKEN": "teldrive_token",
+    "TELDRIVE_ROOT_PATH": "teldrive_root_path",
+    "TELDRIVE_CHANNEL_ID": "teldrive_channel_id",
+    "TELDRIVE_UPLOAD_IMAGES": "teldrive_upload_images",
+    "TELDRIVE_RECORD_ENABLED": "teldrive_record_enabled",
+    "TELDRIVE_RECORD_SECONDS": "teldrive_record_seconds",
+    "TELDRIVE_RECORD_COOLDOWN": "teldrive_record_cooldown",
     "JWT_SECRET": "jwt_secret",
 }
 
 # Numeric keys that need type coercion when read from DB (stored as TEXT)
-_INT_KEYS = {"yolo_imgsz", "verify_interval", "alert_cooldown", "frame_skip"}
+_INT_KEYS = {"yolo_imgsz", "verify_interval", "alert_cooldown", "frame_skip", "teldrive_record_seconds", "teldrive_record_cooldown"}
 _FLOAT_KEYS = {"confidence", "loop_sleep"}
+_BOOL_KEYS = {"teldrive_enabled", "teldrive_upload_images", "teldrive_record_enabled"}
 
 
 # ──────────────────────────────────────────────
@@ -144,6 +163,10 @@ def _env_overrides() -> dict[str, Any]:
 
 def _coerce(key: str, value: Any) -> Any:
     """Cast value to the correct Python type for a given config key."""
+    if key in _BOOL_KEYS:
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
     if key in _INT_KEYS:
         return positive_int(value, key)
     if key == "confidence":
@@ -293,6 +316,11 @@ def write_config(new_config: dict[str, Any]) -> dict[str, Any]:
     clean["alert_cooldown"] = positive_int(clean["alert_cooldown"], "alert_cooldown")
     clean["frame_skip"] = positive_int(clean["frame_skip"], "frame_skip")
     clean["yolo_imgsz"] = positive_int(clean["yolo_imgsz"], "yolo_imgsz")
+    clean["teldrive_record_seconds"] = positive_int(clean["teldrive_record_seconds"], "teldrive_record_seconds")
+    clean["teldrive_record_cooldown"] = positive_int(clean["teldrive_record_cooldown"], "teldrive_record_cooldown")
+    clean["teldrive_enabled"] = _coerce("teldrive_enabled", clean["teldrive_enabled"])
+    clean["teldrive_upload_images"] = _coerce("teldrive_upload_images", clean["teldrive_upload_images"])
+    clean["teldrive_record_enabled"] = _coerce("teldrive_record_enabled", clean["teldrive_record_enabled"])
     clean["loop_sleep"] = max(0.0, float(clean["loop_sleep"]))
     clean["cameras"] = normalize_cameras(clean)
     clean["prompts"] = normalize_prompts(clean)

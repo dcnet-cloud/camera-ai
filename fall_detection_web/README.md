@@ -89,6 +89,15 @@ cp .env.example .env
 | `ALERT_COOLDOWN` | `alert_cooldown` | Giây tối thiểu giữa 2 cảnh báo Telegram |
 | `FRAME_SKIP` | `frame_skip` | Bỏ N-1 frame để giảm CPU |
 | `LOOP_SLEEP` | `loop_sleep` | Thời gian nghỉ mỗi vòng lặp (giây) |
+| `TELDRIVE_ENABLED` | `teldrive_enabled` | Bật upload ảnh/video event lên Teldrive |
+| `TELDRIVE_BASE_URL` | `teldrive_base_url` | URL Teldrive, ví dụ `https://teldrive.minhhungtsbd.me` |
+| `TELDRIVE_TOKEN` | `teldrive_token` | Bearer token Teldrive |
+| `TELDRIVE_ROOT_PATH` | `teldrive_root_path` | Thư mục gốc trên Teldrive |
+| `TELDRIVE_CHANNEL_ID` | `teldrive_channel_id` | Channel ID Teldrive tùy chọn |
+| `TELDRIVE_UPLOAD_IMAGES` | `teldrive_upload_images` | Upload ảnh event |
+| `TELDRIVE_RECORD_ENABLED` | `teldrive_record_enabled` | Ghi clip ngắn khi YOLO phát hiện người |
+| `TELDRIVE_RECORD_SECONDS` | `teldrive_record_seconds` | Số giây ghi clip |
+| `TELDRIVE_RECORD_COOLDOWN` | `teldrive_record_cooldown` | Cooldown giữa 2 lần ghi clip/camera |
 
 > **Priority:** `.env` / os.environ > SQLite settings > default values
 
@@ -118,7 +127,7 @@ Khi khởi động lần đầu, nếu tồn tại file cũ:
 |---|---|
 | **Dashboard** | Start/Stop monitor, tổng quan trạng thái, 5 events gần nhất |
 | **Cameras** | Thêm/sửa/xóa camera, test snapshot, test AI từng camera |
-| **Live** | Xem stream live đa camera (go2rtc iframe hoặc MJPEG proxy) |
+| **Live** | Xem stream live đa camera, chọn 1/2/3 cột; double-click camera ở 2/3 cột để chuyển camera đó sang full width |
 | **Settings** | Cấu hình YOLO, AI API, Telegram, cooldown, RTSP… |
 | **Events** | Bảng log events với thumbnail ảnh, nút Clear All |
 | **Tools** | Test AI với snapshot, upload ảnh test, test Telegram |
@@ -173,6 +182,25 @@ Thứ tự ưu tiên lấy **snapshot thủ công / test AI**:
 2. Fallback RTSP OpenCV
 
 Monitor chạy nền vẫn dùng RTSP frame để YOLO local detect `person`. go2rtc chỉ dùng cho snapshot thủ công/test và live view khi có cấu hình.
+
+## Teldrive Upload
+
+Khi bật trong tab **Settings**, app có thể upload ảnh event và clip ngắn lên Teldrive self-hosted.
+
+Luồng upload:
+
+1. Tạo thư mục bằng `POST /api/files/mkdir`
+2. Upload file part bằng `POST /api/uploads/{upload_id}`
+3. Tạo file metadata bằng `POST /api/files`
+
+Mặc định app dùng `https://teldrive.minhhungtsbd.me` và lưu theo cấu trúc:
+
+```text
+/Fall Detection/{camera}/images/
+/Fall Detection/{camera}/videos/
+```
+
+Clip ghi hình dùng OpenCV `VideoWriter` định dạng `.avi` để tránh phụ thuộc `ffmpeg`.
 
 Thứ tự ưu tiên **live view**:
 
