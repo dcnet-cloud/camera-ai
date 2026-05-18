@@ -170,11 +170,20 @@ async def teldrive_file(request: Request, file_id: str, file_name: str, _: str =
         c = config.read_config()
         response = teldrive.download_file(c, file_id, file_name, request.headers.get("range", ""))
         media_type = response.headers.get("content-type", "application/octet-stream")
+        guessed_media_type = teldrive._mime_type(file_name)
+        if media_type == "application/octet-stream":
+            media_type = guessed_media_type
         headers = {"Cache-Control": "private, max-age=300"}
-        for name in ("accept-ranges", "content-length", "content-range", "etag", "last-modified", "content-disposition"):
+        for name in ("accept-ranges", "content-length", "content-range", "etag", "last-modified"):
             value = response.headers.get(name)
             if value:
                 headers[name] = value
+        if media_type.startswith("video/"):
+            headers["Content-Disposition"] = f'inline; filename="{file_name}"'
+        else:
+            content_disposition = response.headers.get("content-disposition")
+            if content_disposition:
+                headers["Content-Disposition"] = content_disposition
         def stream_body():
             try:
                 yield from response.iter_content(chunk_size=1024 * 256)

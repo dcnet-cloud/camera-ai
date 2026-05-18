@@ -145,7 +145,7 @@ def record_and_upload_clip(
             last_seq = seq
             if writer is None:
                 height, width = frame.shape[:2]
-                for suffix, codec in ((".mp4", "mp4v"), (".avi", "MJPG")):
+                for suffix, codec in ((".mp4", "avc1"), (".mp4", "H264"), (".mp4", "mp4v"), (".avi", "MJPG")):
                     candidate = base_path.with_suffix(suffix)
                     candidate_writer = cv2.VideoWriter(
                         str(candidate),

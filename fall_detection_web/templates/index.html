@@ -185,6 +185,70 @@
       background: var(--panel-2);
     }
     .card b { display: block; font-size: 18px; margin-top: 4px; }
+    .recording-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 14px;
+    }
+    .recording-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-2);
+      overflow: hidden;
+    }
+    .recording-video {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      display: block;
+      background: #020507;
+    }
+    .recording-body {
+      padding: 12px;
+      display: grid;
+      gap: 10px;
+    }
+    .recording-meta {
+      display: grid;
+      gap: 8px;
+    }
+    .recording-row {
+      display: grid;
+      grid-template-columns: 92px minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+    }
+    .recording-row span {
+      color: var(--muted);
+      font-weight: 700;
+      font-size: 12px;
+    }
+    .recording-path {
+      word-break: break-all;
+      font-size: 13px;
+    }
+    .recording-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      justify-content: flex-end;
+    }
+    .button-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 42px;
+      padding: 10px 14px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      color: var(--text);
+      text-decoration: none;
+      background: var(--panel);
+      font-weight: 700;
+    }
+    .recording-note {
+      color: var(--muted);
+      font-size: 12px;
+    }
     .summary-list {
       display: grid;
       gap: 8px;
@@ -721,12 +785,7 @@
           <button id="refreshRecordingsBtn" type="button">Filter & Refresh</button>
           <span id="recordingsStatus"></span>
         </div>
-        <table>
-          <thead>
-            <tr><th>Time</th><th>Camera</th><th>Video</th><th>Teldrive Path</th></tr>
-          </thead>
-          <tbody id="recordingsBody"></tbody>
-        </table>
+        <div id="recordingsBody" class="recording-grid"></div>
       </div>
     </section>
 
@@ -1155,36 +1214,67 @@
     function renderRecordings(recordings) {
       const body = document.getElementById("recordingsBody");
       body.innerHTML = "";
+      if (!recordings.length) {
+        const empty = document.createElement("div");
+        empty.className = "card";
+        empty.innerHTML = "<b>No recordings</b><p>Try another camera or time range.</p>";
+        body.append(empty);
+        setStatus("recordingsStatus", "Loaded 0 recording(s)", "warn");
+        return;
+      }
       for (const item of recordings) {
-        const row = document.createElement("tr");
-        const videoCell = document.createElement("td");
+        const card = document.createElement("article");
+        card.className = "recording-card";
         const video = document.createElement("video");
+        video.className = "recording-video";
         video.controls = true;
         video.preload = "metadata";
         video.src = item.video_url;
-        video.style.width = "220px";
-        videoCell.append(video);
+        video.playsInline = true;
+        video.setAttribute("crossorigin", "use-credentials");
+        const note = document.createElement("div");
+        note.className = "recording-note";
+        note.textContent = "Browser preview depends on the uploaded codec.";
+        video.addEventListener("error", () => {
+          note.textContent = "This clip cannot be decoded by the browser. Open or download it instead.";
+        });
+
+        const content = document.createElement("div");
+        content.className = "recording-body";
+        const meta = document.createElement("div");
+        meta.className = "recording-meta";
+        const rows = [
+          ["Time", item.time_local || formatLocalTime(item.time)],
+          ["Camera", item.camera || "-"],
+          ["Path", item.teldrive_video_path || "-"],
+        ];
+        for (const [label, value] of rows) {
+          const row = document.createElement("div");
+          row.className = "recording-row";
+          const key = document.createElement("span");
+          key.textContent = label;
+          const val = document.createElement("div");
+          if (label === "Path") val.className = "recording-path";
+          val.textContent = value;
+          row.append(key, val);
+          meta.append(row);
+        }
+        const actions = document.createElement("div");
+        actions.className = "recording-actions";
         const open = document.createElement("button");
         open.type = "button";
         open.textContent = "Open";
         open.onclick = () => window.open(item.video_url, "_blank");
-        videoCell.append(open);
-        const values = [
-          item.time_local || formatLocalTime(item.time),
-          item.camera || "",
-          null,
-          item.teldrive_video_path || ""
-        ];
-        for (const value of values) {
-          if (value === null) {
-            row.append(videoCell);
-            continue;
-          }
-          const cell = document.createElement("td");
-          cell.textContent = value;
-          row.append(cell);
-        }
-        body.append(row);
+        const download = document.createElement("a");
+        download.href = item.video_url;
+        download.target = "_blank";
+        download.rel = "noopener";
+        download.textContent = "Download";
+        download.className = "button-link";
+        actions.append(open, download);
+        content.append(meta, note, actions);
+        card.append(video, content);
+        body.append(card);
       }
       setStatus("recordingsStatus", `Loaded ${recordings.length} recording(s)`, recordings.length ? "ok" : "warn");
     }
