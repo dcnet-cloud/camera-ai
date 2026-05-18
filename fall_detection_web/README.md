@@ -214,7 +214,9 @@ Sau khi upload thành công, app lưu lại `file id`, `name` và `path` của T
 Ảnh event local được cache bằng `ETag`/`Last-Modified` trong 24 giờ và thumbnail trong tab **Events** chỉ tải khi tab đang mở và ảnh gần vùng nhìn thấy.
 Proxy Teldrive thử stream file public trước, sau đó mới fallback Bearer token; nếu Teldrive trả `401/403`, app chuyển hướng về URL Teldrive gốc để trình duyệt dùng session Teldrive hiện có.
 
-Clip ghi hình được ghi tạm bằng OpenCV rồi transcode bằng `ffmpeg` sang MP4 H.264 (`libx264`, baseline, `yuv420p`, `+faststart`) nếu máy có `ffmpeg` trong `PATH`. Đây là format phù hợp cho Chrome/HTML5 video/Teldrive preview. Nếu thiếu `ffmpeg`, app sẽ giữ clip raw từ OpenCV và browser có thể không play được dù file tải về vẫn xem được bằng VLC. Trên Ubuntu/Debian VPS nên cài:
+Clip ghi hình ưu tiên lấy trực tiếp từ go2rtc bằng `{go2rtc_url}/api/stream.mp4?src={go2rtc_src}&duration=N&filename=...`. Đây là đường nhẹ CPU nhất vì go2rtc đóng gói stream camera thành MP4; nếu source go2rtc là H.264 thì clip sẽ phù hợp Chrome/HTML5 video/Teldrive preview mà không cần transcode. Nếu camera không có `go2rtc_src` hoặc go2rtc record lỗi, app fallback sang ghi tạm bằng OpenCV rồi transcode bằng `ffmpeg` sang MP4 H.264 (`libx264`, baseline, `yuv420p`, `+faststart`) nếu máy có `ffmpeg` trong `PATH`.
+
+Nếu cần fallback OpenCV/ffmpeg trên Ubuntu/Debian VPS, cài:
 
 ```bash
 sudo apt update

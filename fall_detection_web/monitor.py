@@ -118,6 +118,35 @@ def upload_event_video_safe(config: dict[str, Any], video_path: Path, camera_nam
         insert_event("teldrive_video_error", camera=camera_name, error=str(exc))
 
 
+def safe_camera_name(camera_name: str) -> str:
+    return "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in camera_name) or "camera"
+
+
+def record_go2rtc_clip(config: dict[str, Any], camera: dict[str, Any], output_path: Path) -> Path | None:
+    base_url = str(config.get("go2rtc_url", "")).strip().rstrip("/")
+    src = str(camera.get("go2rtc_src", "")).strip()
+    if not base_url or not src:
+        return None
+
+    seconds = int(config.get("teldrive_record_seconds", 10))
+    response = requests.get(
+        f"{base_url}/api/stream.mp4",
+        params={"src": src, "duration": seconds, "filename": output_path.name},
+        stream=True,
+        timeout=seconds + 30,
+    )
+    response.raise_for_status()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("wb") as fh:
+        for chunk in response.iter_content(chunk_size=1024 * 256):
+            if chunk:
+                fh.write(chunk)
+    if output_path.exists() and output_path.stat().st_size > 0:
+        logger.info("[RECORD] go2rtc mp4 clip saved src=%s file=%s", src, output_path.name)
+        return output_path
+    return None
+
+
 def transcode_to_h264_mp4(source_path: Path, target_path: Path) -> Path:
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
@@ -175,9 +204,17 @@ def record_and_upload_clip(
     try:
         CLIPS_DIR.mkdir(parents=True, exist_ok=True)
         stamp = time.strftime("%Y%m%dT%H%M%S")
-        safe_camera = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in camera_name) or "camera"
+        safe_camera = safe_camera_name(camera_name)
         base_path = CLIPS_DIR / f"{stamp}_{safe_camera}"
         final_path = base_path.with_suffix(".mp4")
+
+        try:
+            go2rtc_path = record_go2rtc_clip(config, camera, final_path)
+            if go2rtc_path:
+                upload_event_video_safe(config, go2rtc_path, camera_name)
+                return
+        except Exception as exc:
+            logger.warning("[RECORD] go2rtc clip failed camera=%s: %s", camera_name, exc)
 
         while time.time() < deadline and not stop_event.is_set():
             with lock:
