@@ -1290,7 +1290,6 @@
         video.preload = "metadata";
         video.src = item.video_url;
         video.playsInline = true;
-        video.setAttribute("crossorigin", "use-credentials");
         const note = document.createElement("div");
         note.className = "recording-note";
         note.textContent = "Preview requires a browser-compatible MP4 codec.";

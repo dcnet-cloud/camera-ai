@@ -177,9 +177,10 @@ async def teldrive_file(request: Request, file_id: str, file_name: str, _: str =
         for name in ("accept-ranges", "content-length", "content-range", "etag", "last-modified"):
             value = response.headers.get(name)
             if value:
-                headers[name] = value
+                headers[name.title()] = value
         if media_type.startswith("video/"):
             headers["Content-Disposition"] = f'inline; filename="{file_name}"'
+            headers["Accept-Ranges"] = response.headers.get("accept-ranges", "bytes")
         else:
             content_disposition = response.headers.get("content-disposition")
             if content_disposition:
