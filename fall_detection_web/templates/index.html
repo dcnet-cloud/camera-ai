@@ -742,14 +742,6 @@
             <label for="teldrive_channel_id">Teldrive Channel ID (optional)</label>
             <input id="teldrive_channel_id" autocomplete="off">
           </div>
-          <div>
-            <label for="teldrive_record_seconds">Record Seconds</label>
-            <input id="teldrive_record_seconds" type="number" min="1">
-          </div>
-          <div>
-            <label for="teldrive_record_cooldown">Record Cooldown (seconds)</label>
-            <input id="teldrive_record_cooldown" type="number" min="1">
-          </div>
         </div>
         <div class="actions" style="margin-top:14px">
           <button id="saveConfigBtn" class="primary" type="button">Save Settings</button>
@@ -887,6 +879,14 @@
           <input id="modalCamRecordVideo" type="checkbox"> Record/upload video on person detection
         </label>
         <div>
+          <label>Record Seconds</label>
+          <input id="modalCamRecordSeconds" type="number" min="1" value="10">
+        </div>
+        <div>
+          <label>Record Cooldown (seconds)</label>
+          <input id="modalCamRecordCooldown" type="number" min="1" value="300">
+        </div>
+        <div>
           <label>AI Prompt</label>
           <select id="modalCamPrompt">
             <option value="">Global Fallback (Default)</option>
@@ -933,8 +933,7 @@
     let eventImageObserver = null;
     const persistentStatusIds = new Set(["teldriveTokenStatus"]);
     const numericIds = [
-      "confidence", "verify_interval", "alert_cooldown", "frame_skip", "loop_sleep", "yolo_imgsz",
-      "teldrive_record_seconds", "teldrive_record_cooldown"
+      "confidence", "verify_interval", "alert_cooldown", "frame_skip", "loop_sleep", "yolo_imgsz"
     ];
     const checkboxIds = ["teldrive_enabled"];
     const configIds = [
@@ -1346,7 +1345,9 @@
         prompt_id: camera.prompt_id || "",
         local_save_images: camera.local_save_images !== false,
         teldrive_upload_images: camera.teldrive_upload_images !== false,
-        teldrive_record_enabled: camera.teldrive_record_enabled === true
+        teldrive_record_enabled: camera.teldrive_record_enabled === true,
+        record_seconds: Math.max(1, Number(camera.record_seconds || 10)),
+        record_cooldown: Math.max(1, Number(camera.record_cooldown || 300))
       };
     }
     function streamNameFromRtsp(rtspUrl) {
@@ -1426,7 +1427,10 @@
     document.getElementById("modalPromptSaveBtn").onclick = () => {
       const title = document.getElementById("modalPromptTitle").value.trim();
       const content = document.getElementById("modalPromptContent").value.trim();
-      if (!title || !content) return alert("Title and content are required");
+      if (!title || !content) {
+        showToast("Title and content are required", "warn");
+        return;
+      }
       
       if (editingPromptId) {
         const p = prompts.find(x => x.id === editingPromptId);
@@ -1544,7 +1548,7 @@
       const modal = document.getElementById("cameraModal");
       document.getElementById("cameraModalTitle").textContent = index >= 0 ? "Edit Camera" : "Add Camera";
       
-      const cam = index >= 0 ? cameras[index] : {enabled: true, name: "", rtsp_url: "", go2rtc_src: "", live_url: "", prompt_id: "", local_save_images: true, teldrive_upload_images: true, teldrive_record_enabled: false};
+      const cam = index >= 0 ? cameras[index] : {enabled: true, name: "", rtsp_url: "", go2rtc_src: "", live_url: "", prompt_id: "", local_save_images: true, teldrive_upload_images: true, teldrive_record_enabled: false, record_seconds: 10, record_cooldown: 300};
       document.getElementById("modalCamEnabled").checked = cam.enabled;
       document.getElementById("modalCamName").value = cam.name;
       document.getElementById("modalCamRtsp").value = cam.rtsp_url;
@@ -1554,6 +1558,8 @@
       document.getElementById("modalCamSaveImages").checked = cam.local_save_images !== false;
       document.getElementById("modalCamUploadImages").checked = cam.teldrive_upload_images !== false;
       document.getElementById("modalCamRecordVideo").checked = cam.teldrive_record_enabled === true;
+      document.getElementById("modalCamRecordSeconds").value = cam.record_seconds || 10;
+      document.getElementById("modalCamRecordCooldown").value = cam.record_cooldown || 300;
       modal.showModal();
     }
 
@@ -1569,9 +1575,14 @@
         prompt_id: document.getElementById("modalCamPrompt").value,
         local_save_images: document.getElementById("modalCamSaveImages").checked,
         teldrive_upload_images: document.getElementById("modalCamUploadImages").checked,
-        teldrive_record_enabled: document.getElementById("modalCamRecordVideo").checked
+        teldrive_record_enabled: document.getElementById("modalCamRecordVideo").checked,
+        record_seconds: Math.max(1, Number(document.getElementById("modalCamRecordSeconds").value || 10)),
+        record_cooldown: Math.max(1, Number(document.getElementById("modalCamRecordCooldown").value || 300))
       };
-      if (!cam.name && !cam.rtsp_url) return alert("Name or RTSP URL is required");
+      if (!cam.name && !cam.rtsp_url) {
+        showToast("Name or RTSP URL is required", "warn");
+        return;
+      }
       
       if (editingCameraIndex >= 0) cameras[editingCameraIndex] = cam;
       else cameras.push(cam);

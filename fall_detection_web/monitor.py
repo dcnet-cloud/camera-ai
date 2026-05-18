@@ -128,7 +128,7 @@ def record_go2rtc_clip(config: dict[str, Any], camera: dict[str, Any], output_pa
     if not base_url or not src:
         return None
 
-    seconds = int(config.get("teldrive_record_seconds", 10))
+    seconds = int(camera.get("record_seconds", config.get("teldrive_record_seconds", 10)))
     response = requests.get(
         f"{base_url}/api/stream.mp4",
         params={"src": src, "duration": seconds, "filename": output_path.name},
@@ -194,7 +194,7 @@ def record_and_upload_clip(
     import cv2
 
     camera_name = str(camera["name"])
-    seconds = int(config.get("teldrive_record_seconds", 10))
+    seconds = int(camera.get("record_seconds", config.get("teldrive_record_seconds", 10)))
     fps = 8.0
     deadline = time.time() + seconds
     writer = None
@@ -502,7 +502,7 @@ def _monitor_loop(config: dict[str, Any]) -> None:
                     if (
                         teldrive.enabled(config)
                         and camera.get("teldrive_record_enabled")
-                        and now - last_record[index] > float(config.get("teldrive_record_cooldown", 300))
+                        and now - last_record[index] > float(camera.get("record_cooldown", config.get("teldrive_record_cooldown", 300)))
                     ):
                         last_record[index] = now
                         threading.Thread(

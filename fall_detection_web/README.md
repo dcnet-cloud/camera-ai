@@ -94,8 +94,8 @@ cp .env.example .env
 | `TELDRIVE_TOKEN` | `teldrive_token` | Bearer token Teldrive |
 | `TELDRIVE_ROOT_PATH` | `teldrive_root_path` | Thư mục gốc trên Teldrive |
 | `TELDRIVE_CHANNEL_ID` | `teldrive_channel_id` | Channel ID Teldrive tùy chọn |
-| `TELDRIVE_RECORD_SECONDS` | `teldrive_record_seconds` | Số giây ghi clip |
-| `TELDRIVE_RECORD_COOLDOWN` | `teldrive_record_cooldown` | Cooldown giữa 2 lần ghi clip/camera |
+| `TELDRIVE_RECORD_SECONDS` | `teldrive_record_seconds` | Fallback legacy cho camera chưa có Record Seconds riêng |
+| `TELDRIVE_RECORD_COOLDOWN` | `teldrive_record_cooldown` | Fallback legacy cho camera chưa có Record Cooldown riêng |
 
 > **Priority:** `.env` / os.environ > SQLite settings > default values
 
@@ -180,6 +180,8 @@ Camera được cấu hình trong tab **Cameras**. Mỗi camera gồm:
 | Save event images locally | Lưu ảnh event vào `data/event_images/` cho camera này |
 | Upload event images | Upload ảnh event của camera này lên Teldrive |
 | Record/upload video | Ghi và upload clip ngắn khi camera này phát hiện `person` |
+| Record Seconds | Số giây ghi clip riêng cho camera này |
+| Record Cooldown | Cooldown giữa 2 lần ghi clip riêng cho camera này |
 
 Thứ tự ưu tiên lấy **snapshot thủ công / test AI**:
 
