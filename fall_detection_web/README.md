@@ -186,6 +186,7 @@ Thứ tự ưu tiên lấy **snapshot thủ công / test AI**:
 2. Fallback RTSP OpenCV
 
 Monitor chạy nền vẫn dùng RTSP frame để YOLO local detect `person`. go2rtc chỉ dùng cho snapshot thủ công/test và live view khi có cấu hình.
+Nếu chưa có camera `enabled` với `rtsp_url`, monitor sẽ không auto-start và API start sẽ trả lỗi rõ ràng thay vì làm crash thread nền.
 
 ## Teldrive Upload
 

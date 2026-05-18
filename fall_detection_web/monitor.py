@@ -331,12 +331,18 @@ def capture_latest_frames(index: int, camera: dict[str, Any], holder: dict[str, 
         cap.release()
 
 
-def _monitor_loop(config: dict[str, Any]) -> None:
+def _enabled_rtsp_cameras(config: dict[str, Any]) -> list[dict[str, Any]]:
     all_cameras = [camera for camera in normalize_cameras(config) if camera.get("enabled")]
-    cameras = [camera for camera in all_cameras if camera.get("rtsp_url")]
-    
+    return [camera for camera in all_cameras if camera.get("rtsp_url")]
+
+
+def _monitor_loop(config: dict[str, Any]) -> None:
+    cameras = _enabled_rtsp_cameras(config)
     if not cameras:
-        raise ValueError("No enabled cameras with RTSP URLs")
+        message = "No enabled cameras with RTSP URLs"
+        set_state(running=False, last_error=message)
+        logger.warning("[MONITOR] %s", message)
+        return
         
     import cv2
     from ultralytics import YOLO
@@ -478,6 +484,10 @@ def start_monitor(config: dict[str, Any]) -> str:
     with monitor_lock:
         if worker_thread and worker_thread.is_alive():
             return "already running"
+        if not _enabled_rtsp_cameras(config):
+            message = "No enabled cameras with RTSP URLs"
+            set_state(running=False, last_error=message)
+            raise ValueError(message)
         stop_event.clear()
         worker_thread = threading.Thread(target=_monitor_loop, args=(config,), daemon=True)
         worker_thread.start()
@@ -495,6 +505,7 @@ def stop_monitor(wait: bool = False) -> None:
 
 
 def restart_monitor(config: dict[str, Any]) -> None:
+    global worker_thread
     with monitor_lock:
         thread = worker_thread
         if not thread or not thread.is_alive():
@@ -506,8 +517,15 @@ def restart_monitor(config: dict[str, Any]) -> None:
             set_state(last_error=message)
             insert_event("restart_error", error=message)
             raise RuntimeError(message)
+        worker_thread = None
+        cameras = _enabled_rtsp_cameras(config)
+        if not cameras:
+            message = "Monitor stopped because no enabled cameras with RTSP URLs remain"
+            set_state(running=False, last_error=message)
+            insert_event("config_applied", message=message)
+            return
         stop_event.clear()
         new_thread = threading.Thread(target=_monitor_loop, args=(config,), daemon=True)
-        globals()["worker_thread"] = new_thread
+        worker_thread = new_thread
         new_thread.start()
         insert_event("config_applied", message="Monitor restarted with new settings")

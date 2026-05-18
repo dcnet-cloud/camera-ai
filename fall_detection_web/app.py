@@ -61,6 +61,8 @@ async def lifespan(app: FastAPI):
     try:
         if monitor.start_monitor(current_config) == "started":
             logger.info("Auto-started YOLO monitor on boot.")
+    except ValueError as exc:
+        logger.warning("Skipping auto-start monitor: %s", exc)
     except Exception as exc:
         logger.error("Could not auto-start monitor: %s", exc)
         
