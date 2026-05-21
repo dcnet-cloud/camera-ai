@@ -308,7 +308,7 @@ After=network-online.target
 [Service]
 User=root
 WorkingDirectory=/opt/fall-detection
-ExecStart=/opt/fall-detection/venv/bin/uvicorn app:app --host 0.0.0.0 --port 8090
+ExecStart=/opt/fall-detection/venv/bin/uvicorn app:app --host 0.0.0.0 --port 8090 --no-access-log
 Restart=always
 RestartSec=5
 EnvironmentFile=/opt/fall-detection/.env
