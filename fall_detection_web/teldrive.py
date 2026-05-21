@@ -197,20 +197,11 @@ def download_file(config: dict[str, Any], file_id: str, file_name: str, range_he
     headers = {}
     if range_header:
         headers["Range"] = range_header
+    if str(config.get("teldrive_token", "")).strip():
+        headers = {**_headers(config), **headers}
     response = _session.get(
         file_url(config, file_id, file_name),
         headers=headers,
-        stream=True,
-        timeout=60,
-    )
-    if response.status_code not in (401, 403) or not str(config.get("teldrive_token", "")).strip():
-        response.raise_for_status()
-        return response
-    response.close()
-    auth_headers = {**_headers(config), **headers}
-    response = _session.get(
-        file_url(config, file_id, file_name),
-        headers=auth_headers,
         stream=True,
         timeout=60,
     )
