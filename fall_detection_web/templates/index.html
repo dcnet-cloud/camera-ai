@@ -349,6 +349,12 @@
     .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     .split { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
     .muted { color: var(--muted); }
+    .help-text {
+      color: var(--muted);
+      display: block;
+      font-size: 12px;
+      margin-top: 5px;
+    }
     .truncate { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .empty {
       min-height: 110px;
@@ -852,58 +858,58 @@
       <section id="view-settings" class="view">
         <form id="settingsForm" class="grid">
           <section class="panel">
-            <div class="panel-head"><div><h3>AI Vision</h3><p>OpenAI-compatible provider and verification prompt.</p></div></div>
+            <div class="panel-head"><div><h3>AI Vision</h3><p>Cấu hình API AI tương thích OpenAI và prompt xác minh.</p></div></div>
             <div class="form-grid">
-              <div class="field"><label for="ai_base_url">AI base URL</label><input id="ai_base_url" autocomplete="off"></div>
-              <div class="field"><label for="ai_api_key">AI API key</label><input id="ai_api_key" autocomplete="off" type="password"></div>
-              <div class="field"><label for="vision_model">Vision model</label><input id="vision_model" autocomplete="off"></div>
-              <div class="field"><label for="fallback_vision_model">Fallback model</label><input id="fallback_vision_model" autocomplete="off"></div>
-              <div class="field full"><label for="verify_prompt">Default verification prompt</label><textarea id="verify_prompt"></textarea></div>
+              <div class="field"><label for="ai_base_url">URL API AI</label><input id="ai_base_url" autocomplete="off"></div>
+              <div class="field"><label for="ai_api_key">API key AI</label><input id="ai_api_key" autocomplete="off" type="password"></div>
+              <div class="field"><label for="vision_model">Model vision chính</label><input id="vision_model" autocomplete="off"></div>
+              <div class="field"><label for="fallback_vision_model">Model dự phòng</label><input id="fallback_vision_model" autocomplete="off"></div>
+              <div class="field full"><label for="verify_prompt">Prompt xác minh mặc định</label><textarea id="verify_prompt"></textarea></div>
             </div>
           </section>
 
           <section class="panel">
-            <div class="panel-head"><div><h3>Detection</h3><p>Local person detection and verification cadence.</p></div></div>
+            <div class="panel-head"><div><h3>Phát hiện và xác minh</h3><p>Tham số chung cho YOLO, tần suất gọi AI và gửi cảnh báo.</p></div></div>
             <div class="form-grid three">
-              <div class="field"><label for="rtsp_url">Fallback RTSP URL</label><input id="rtsp_url" autocomplete="off"></div>
+              <div class="field"><label for="rtsp_url">RTSP dự phòng</label><input id="rtsp_url" autocomplete="off"><span class="help-text">Chỉ dùng khi chưa có camera riêng.</span></div>
               <div class="field"><label for="go2rtc_url">go2rtc URL</label><input id="go2rtc_url" autocomplete="off" placeholder="http://127.0.0.1:1984"></div>
-              <div class="field"><label for="yolo_model">YOLO model</label><input id="yolo_model" autocomplete="off"></div>
-              <div class="field"><label for="confidence">Confidence</label><input id="confidence" type="number" min="0.01" max="1" step="0.01"></div>
-              <div class="field"><label for="yolo_imgsz">YOLO image size</label><input id="yolo_imgsz" type="number" min="1"></div>
-              <div class="field"><label for="frame_skip">Frame skip</label><input id="frame_skip" type="number" min="1"></div>
-              <div class="field"><label for="verify_interval">Verify interval seconds</label><input id="verify_interval" type="number" min="1"></div>
-              <div class="field"><label for="alert_cooldown">Alert cooldown seconds</label><input id="alert_cooldown" type="number" min="1"></div>
-              <div class="field"><label for="loop_sleep">Loop sleep seconds</label><input id="loop_sleep" type="number" min="0" step="0.1"></div>
+              <div class="field"><label for="yolo_model">Model YOLO</label><input id="yolo_model" autocomplete="off"></div>
+              <div class="field"><label for="confidence">Ngưỡng phát hiện người</label><input id="confidence" type="number" min="0.01" max="1" step="0.01"></div>
+              <div class="field"><label for="yolo_imgsz">Kích thước ảnh YOLO</label><input id="yolo_imgsz" type="number" min="1"></div>
+              <div class="field"><label for="frame_skip">Bỏ qua frame</label><input id="frame_skip" type="number" min="1"><span class="help-text">Số frame bỏ qua để giảm tải CPU.</span></div>
+              <div class="field"><label for="verify_interval">Khoảng cách giữa 2 lần gọi AI (giây)</label><input id="verify_interval" type="number" min="1"><span class="help-text">Tham số chung cho mọi camera.</span></div>
+              <div class="field"><label for="alert_cooldown">Thời gian chờ gửi cảnh báo tiếp theo (giây)</label><input id="alert_cooldown" type="number" min="1"><span class="help-text">Tham số chung cho Telegram, tránh spam cảnh báo.</span></div>
+              <div class="field"><label for="loop_sleep">Thời gian nghỉ mỗi vòng quét (giây)</label><input id="loop_sleep" type="number" min="0" step="0.1"><span class="help-text">Tham số chung, tăng lên nếu VPS tải cao.</span></div>
             </div>
           </section>
 
           <section class="panel">
-            <div class="panel-head"><div><h3>Notifications and Evidence</h3><p>Telegram alerts and Teldrive upload settings.</p></div></div>
+            <div class="panel-head"><div><h3>Thông báo và lưu bằng chứng</h3><p>Cấu hình Telegram, Teldrive và giá trị mặc định cho camera mới.</p></div></div>
             <div class="form-grid">
-              <div class="field"><label for="telegram_bot_token">Telegram bot token</label><input id="telegram_bot_token" type="password" autocomplete="off"></div>
-              <div class="field"><label for="telegram_chat_id">Telegram chat ID</label><input id="telegram_chat_id" autocomplete="off"></div>
-              <div class="field"><label for="teldrive_base_url">Teldrive base URL</label><input id="teldrive_base_url" autocomplete="off"></div>
+              <div class="field"><label for="telegram_bot_token">Token bot Telegram</label><input id="telegram_bot_token" type="password" autocomplete="off"></div>
+              <div class="field"><label for="telegram_chat_id">Chat ID Telegram</label><input id="telegram_chat_id" autocomplete="off"></div>
+              <div class="field"><label for="teldrive_base_url">URL Teldrive</label><input id="teldrive_base_url" autocomplete="off"></div>
               <div class="field"><label for="teldrive_token">Teldrive token</label><input id="teldrive_token" type="password" autocomplete="off"></div>
-              <div class="field"><label for="teldrive_root_path">Teldrive root path</label><input id="teldrive_root_path" autocomplete="off"></div>
+              <div class="field"><label for="teldrive_root_path">Thư mục gốc Teldrive</label><input id="teldrive_root_path" autocomplete="off"></div>
               <div class="field"><label for="teldrive_channel_id">Teldrive channel ID</label><input id="teldrive_channel_id" autocomplete="off"></div>
-              <label class="check-row"><input id="teldrive_enabled" type="checkbox">Enable Teldrive</label>
-              <label class="check-row"><input id="teldrive_upload_images" type="checkbox">Upload event images</label>
-              <label class="check-row"><input id="teldrive_record_enabled" type="checkbox">Record event video</label>
-              <div class="field"><label for="teldrive_record_seconds">Record seconds</label><input id="teldrive_record_seconds" type="number" min="1"></div>
-              <div class="field"><label for="teldrive_record_cooldown">Record cooldown seconds</label><input id="teldrive_record_cooldown" type="number" min="1"></div>
+              <label class="check-row"><input id="teldrive_enabled" type="checkbox">Bật Teldrive</label>
+              <label class="check-row"><input id="teldrive_upload_images" type="checkbox">Mặc định upload ảnh sự kiện</label>
+              <label class="check-row"><input id="teldrive_record_enabled" type="checkbox">Mặc định ghi video sự kiện</label>
+              <div class="field"><label for="teldrive_record_seconds">Thời lượng quay mặc định (giây)</label><input id="teldrive_record_seconds" type="number" min="1"><span class="help-text">Fallback cho camera mới hoặc camera chưa đặt thời lượng riêng.</span></div>
+              <div class="field"><label for="teldrive_record_cooldown">Thời gian chờ quay mặc định (giây)</label><input id="teldrive_record_cooldown" type="number" min="1"><span class="help-text">Fallback cho camera mới hoặc camera chưa đặt cooldown riêng.</span></div>
             </div>
             <div class="actions" style="margin-top:14px;">
-              <button id="checkTeldriveBtn" class="btn" type="button"><span data-icon="check"></span>Check Teldrive</button>
+              <button id="checkTeldriveBtn" class="btn" type="button"><span data-icon="check"></span>Kiểm tra Teldrive</button>
               <span id="teldriveTokenStatus" class="muted"></span>
             </div>
           </section>
 
           <section class="panel">
             <div class="split">
-              <div><h3>Save Configuration</h3><p class="muted">Settings are persisted to SQLite and the monitor restarts when needed.</p></div>
+              <div><h3>Lưu cấu hình</h3><p class="muted">Cấu hình lưu vào SQLite. Monitor sẽ tự restart khi cần.</p></div>
               <div class="actions">
-                <button id="reloadConfigBtn" class="btn" type="button"><span data-icon="refresh"></span>Reload</button>
-                <button id="saveConfigBtn" class="btn primary" type="submit"><span data-icon="save"></span>Save settings</button>
+                <button id="reloadConfigBtn" class="btn" type="button"><span data-icon="refresh"></span>Tải lại</button>
+                <button id="saveConfigBtn" class="btn primary" type="submit"><span data-icon="save"></span>Lưu cài đặt</button>
               </div>
             </div>
             <div id="configStatus" class="muted" style="margin-top:12px;"></div>
@@ -1105,6 +1111,34 @@
     }
     function fmt(value) { return value ? String(value) : "-"; }
     function setText(id, value) { const el = $(id); if (el) el.textContent = value; }
+    function formatTimeUtc7(value) {
+      if (!value) return "-";
+      const raw = String(value).trim();
+      let date;
+      if (/^\d{4}-\d{2}-\d{2}T/.test(raw)) {
+        date = new Date(/[zZ]|[+-]\d{2}:?\d{2}$/.test(raw) ? raw : `${raw}Z`);
+      } else {
+        date = new Date(raw);
+      }
+      if (Number.isNaN(date.getTime())) return raw;
+      const parts = new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Asia/Ho_Chi_Minh",
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false
+      }).formatToParts(date).reduce((acc, part) => {
+        acc[part.type] = part.value;
+        return acc;
+      }, {});
+      return `${parts.day}/${parts.month}/${parts.year} - ${parts.hour}:${parts.minute}:${parts.second}`;
+    }
+    function eventDescription(event) {
+      return event.message || event.ai_raw || event.description || event.error || "-";
+    }
     function makeId() {
       if (window.crypto && typeof window.crypto.randomUUID === "function") return window.crypto.randomUUID();
       return `prompt-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -1261,7 +1295,7 @@
       setText("aiResult", status.last_ai_result || "-");
       $("aiBadge").className = `badge ${badgeClass(status.last_ai_result)}`;
       $("aiBadge").textContent = status.last_ai_result || "Idle";
-      setText("lastVerify", `Last verify: ${status.last_verify || "-"}`);
+      setText("lastVerify", `Xác minh gần nhất: ${formatTimeUtc7(status.last_verify_at || status.last_verify)}`);
       setText("cpuPercent", `${system.cpu_percent ?? 0}%`);
       setText("ramPercent", `${system.ram_percent ?? 0}%`);
       setText("diskPercent", `${system.disk_percent ?? 0}%`);
@@ -1315,11 +1349,11 @@
         body.innerHTML = events.map(event => `
           <tr>
             <td>${event.image_url ? `<button class="btn small view-image" data-url="${esc(event.image_url)}" data-title="Event ${esc(event.id)}" type="button"><img class="event-thumb" src="${esc(event.image_url)}" loading="lazy" alt="Event image"></button>` : '<span class="badge">No image</span>'}</td>
-            <td class="mono">${esc(event.time || "-")}</td>
+            <td class="mono">${esc(formatTimeUtc7(event.time || event.time_local))}</td>
             <td>${esc(event.camera || "-")}</td>
             <td><span class="badge ${badgeClass(event.status)}">${esc(event.status || "-")}</span></td>
             <td><span class="badge ${badgeClass(event.ai_result)}">${esc(event.ai_result || "-")}</span></td>
-            <td>${esc(event.description || event.error || "-")}</td>
+            <td>${esc(eventDescription(event))}</td>
           </tr>
         `).join("");
       }
@@ -1355,7 +1389,7 @@
           <article class="recording-card">
             <video controls preload="metadata" src="${esc(item.video_url || "")}"></video>
             <div class="split">
-              <div><b>${esc(item.camera || "Camera")}</b><p class="muted">${esc(item.time || "-")}</p></div>
+              <div><b>${esc(item.camera || "Camera")}</b><p class="muted">${esc(formatTimeUtc7(item.time || item.time_local))}</p></div>
               <a class="btn small" href="${esc(item.video_url || "#")}" target="_blank" rel="noopener">Open</a>
             </div>
           </article>
