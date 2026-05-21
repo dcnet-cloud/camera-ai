@@ -376,6 +376,8 @@
       gap: 14px;
       width: fit-content;
       max-width: 100%;
+      position: relative;
+      padding-right: 54px;
     }
     .camera-card-main {
       min-width: 0;
@@ -433,6 +435,11 @@
       align-items: center;
       justify-content: flex-start;
       gap: 12px;
+    }
+    .camera-status-badge {
+      position: absolute;
+      top: 13px;
+      right: 13px;
     }
 
     .live-toolbar { margin-bottom: 14px; }
@@ -575,6 +582,10 @@
       .camera-list-card { grid-template-columns: 1fr; }
       .camera-card-main { min-height: auto; }
       .camera-meta-stack { grid-template-columns: 1fr; }
+      .camera-status-badge {
+        position: static;
+        width: fit-content;
+      }
       .span-2, .span-3 { grid-column: auto; }
       .top-actions, .actions, .split { align-items: stretch; flex-direction: column; }
       .btn, .status-chip { width: 100%; }
@@ -1468,14 +1479,13 @@
               <div class="actions">
                 <button class="btn small camera-open-btn" data-index="${index}" type="button">Open detail</button>
                 <button class="btn small camera-toggle" data-index="${index}" type="button">${camera.enabled ? "Disable" : "Enable"}</button>
-                <button class="btn small camera-snapshot" data-index="${index}" type="button">Snapshot</button>
                 <button class="btn small camera-test" data-index="${index}" type="button">Test AI</button>
                 <button class="btn small camera-edit" data-index="${index}" type="button">Edit</button>
                 <button class="btn small danger camera-delete" data-index="${index}" type="button">Delete</button>
-                <span class="badge ${camera.enabled ? "good" : "bad"}">${camera.enabled ? "Enabled" : "Disabled"}</span>
               </div>
             </div>
           </div>
+          <span class="badge camera-status-badge ${camera.enabled ? "good" : "bad"}">${camera.enabled ? "Enabled" : "Disabled"}</span>
         </article>
       `).join("");
     }
