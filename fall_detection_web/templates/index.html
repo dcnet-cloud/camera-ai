@@ -872,14 +872,14 @@
             <div class="panel-head"><div><h3>Phát hiện và xác minh</h3><p>Tham số chung cho YOLO, tần suất gọi AI và gửi cảnh báo.</p></div></div>
             <div class="form-grid three">
               <div class="field"><label for="rtsp_url">RTSP dự phòng</label><input id="rtsp_url" autocomplete="off"><span class="help-text">Chỉ dùng khi chưa có camera riêng.</span></div>
-              <div class="field"><label for="go2rtc_url">go2rtc URL</label><input id="go2rtc_url" autocomplete="off" placeholder="http://127.0.0.1:1984"></div>
-              <div class="field"><label for="yolo_model">Model YOLO</label><input id="yolo_model" autocomplete="off"></div>
-              <div class="field"><label for="confidence">Ngưỡng phát hiện người</label><input id="confidence" type="number" min="0.01" max="1" step="0.01"></div>
-              <div class="field"><label for="yolo_imgsz">Kích thước ảnh YOLO</label><input id="yolo_imgsz" type="number" min="1"></div>
-              <div class="field"><label for="frame_skip">Bỏ qua frame</label><input id="frame_skip" type="number" min="1"><span class="help-text">Số frame bỏ qua để giảm tải CPU.</span></div>
-              <div class="field"><label for="verify_interval">Khoảng cách giữa 2 lần gọi AI (giây)</label><input id="verify_interval" type="number" min="1"><span class="help-text">Tham số chung cho mọi camera.</span></div>
-              <div class="field"><label for="alert_cooldown">Thời gian chờ gửi cảnh báo tiếp theo (giây)</label><input id="alert_cooldown" type="number" min="1"><span class="help-text">Tham số chung cho Telegram, tránh spam cảnh báo.</span></div>
-              <div class="field"><label for="loop_sleep">Thời gian nghỉ mỗi vòng quét (giây)</label><input id="loop_sleep" type="number" min="0" step="0.1"><span class="help-text">Tham số chung, tăng lên nếu VPS tải cao.</span></div>
+              <div class="field"><label for="go2rtc_url">go2rtc URL</label><input id="go2rtc_url" autocomplete="off" placeholder="http://127.0.0.1:1984"><span class="help-text">Gợi ý: dùng URL nội bộ go2rtc, ví dụ http://127.0.0.1:1984.</span></div>
+              <div class="field"><label for="yolo_model">Model YOLO</label><input id="yolo_model" autocomplete="off"><span class="help-text">Mặc định: yolov8n.pt. Nhẹ và phù hợp VPS CPU.</span></div>
+              <div class="field"><label for="confidence">Ngưỡng phát hiện người</label><input id="confidence" type="number" min="0.01" max="1" step="0.01"><span class="help-text">Gợi ý: 0.5. Tăng nếu báo nhầm nhiều, giảm nếu bỏ sót.</span></div>
+              <div class="field"><label for="yolo_imgsz">Kích thước ảnh YOLO</label><input id="yolo_imgsz" type="number" min="1"><span class="help-text">Gợi ý: 416. Tăng sẽ chính xác hơn nhưng tốn CPU hơn.</span></div>
+              <div class="field"><label for="frame_skip">Bỏ qua frame</label><input id="frame_skip" type="number" min="1"><span class="help-text">Gợi ý: 2-5. Số càng lớn càng nhẹ CPU nhưng phản ứng chậm hơn.</span></div>
+              <div class="field"><label for="verify_interval">Khoảng cách giữa 2 lần gọi AI (giây)</label><input id="verify_interval" type="number" min="1"><span class="help-text">Gợi ý: 20-60. Tham số chung cho mọi camera.</span></div>
+              <div class="field"><label for="alert_cooldown">Thời gian chờ gửi cảnh báo tiếp theo (giây)</label><input id="alert_cooldown" type="number" min="1"><span class="help-text">Gợi ý: 300-600. Chống spam Telegram toàn hệ thống.</span></div>
+              <div class="field"><label for="loop_sleep">Thời gian nghỉ mỗi vòng quét (giây)</label><input id="loop_sleep" type="number" min="0" step="0.1"><span class="help-text">Gợi ý: 0.3-1.0. Tăng lên nếu VPS tải cao.</span></div>
             </div>
           </section>
 
@@ -895,8 +895,8 @@
               <label class="check-row"><input id="teldrive_enabled" type="checkbox">Bật Teldrive</label>
               <label class="check-row"><input id="teldrive_upload_images" type="checkbox">Mặc định upload ảnh sự kiện</label>
               <label class="check-row"><input id="teldrive_record_enabled" type="checkbox">Mặc định ghi video sự kiện</label>
-              <div class="field"><label for="teldrive_record_seconds">Thời lượng quay mặc định (giây)</label><input id="teldrive_record_seconds" type="number" min="1"><span class="help-text">Fallback cho camera mới hoặc camera chưa đặt thời lượng riêng.</span></div>
-              <div class="field"><label for="teldrive_record_cooldown">Thời gian chờ quay mặc định (giây)</label><input id="teldrive_record_cooldown" type="number" min="1"><span class="help-text">Fallback cho camera mới hoặc camera chưa đặt cooldown riêng.</span></div>
+              <div class="field"><label for="teldrive_record_seconds">Thời lượng quay mặc định (giây)</label><input id="teldrive_record_seconds" type="number" min="1"><span class="help-text">Gợi ý: 10-30. Fallback cho camera mới hoặc camera chưa đặt riêng.</span></div>
+              <div class="field"><label for="teldrive_record_cooldown">Thời gian chờ quay mặc định (giây)</label><input id="teldrive_record_cooldown" type="number" min="1"><span class="help-text">Gợi ý: 300-600. Fallback cho camera mới hoặc camera chưa đặt riêng.</span></div>
             </div>
             <div class="actions" style="margin-top:14px;">
               <button id="checkTeldriveBtn" class="btn" type="button"><span data-icon="check"></span>Kiểm tra Teldrive</button>
