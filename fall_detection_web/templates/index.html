@@ -225,7 +225,7 @@
     .span-2 { grid-column: span 2; }
     .span-3 { grid-column: span 3; }
 
-    .panel, .stat-card, .table-panel {
+    .panel, .stat-card {
       border: 1px solid var(--line);
       border-radius: var(--radius);
       background: linear-gradient(180deg, rgba(15, 23, 42, .94), rgba(12, 21, 36, .94));
@@ -368,7 +368,7 @@
       background: rgba(2, 6, 23, .22);
     }
 
-    .camera-card, .prompt-card, .recording-card {
+    .camera-card, .prompt-card {
       border: 1px solid var(--line);
       border-radius: var(--radius);
       background: rgba(2, 6, 23, .24);
@@ -376,102 +376,9 @@
       display: grid;
       gap: 12px;
     }
-    .camera-list-card {
-      grid-template-columns: 220px minmax(0, max-content);
-      align-items: start;
-      gap: 14px;
-      width: fit-content;
-      max-width: 100%;
-      position: relative;
-      padding-right: 54px;
-    }
-    .camera-card-main {
-      min-width: 0;
-      min-height: 124px;
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-      gap: 10px;
-    }
     .camera-title { display: block; }
-    .camera-open { cursor: pointer; border-radius: var(--radius); }
-    .camera-open:focus-visible { outline: 3px solid rgba(34, 197, 94, .22); outline-offset: 4px; }
     .camera-title h3 { font-size: 14px; }
     .camera-title p { color: var(--muted); margin-top: 4px; word-break: break-all; }
-    .camera-thumb {
-      width: 100%;
-      aspect-ratio: 16 / 9;
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background:
-        linear-gradient(135deg, rgba(56, 189, 248, .10), rgba(34, 197, 94, .08)),
-        rgba(2, 6, 23, .52);
-      overflow: hidden;
-      position: relative;
-    }
-    .camera-thumb img {
-      width: 100%;
-      height: 100%;
-      display: block;
-      object-fit: cover;
-      background: #000;
-    }
-    .camera-thumb .empty {
-      min-height: 100%;
-      border: 0;
-      border-radius: 0;
-      background: transparent;
-    }
-    .thumb-refresh {
-      position: absolute;
-      top: 8px;
-      right: 8px;
-      width: 32px;
-      height: 32px;
-      border: 1px solid rgba(148, 163, 184, .42);
-      border-radius: 8px;
-      background: rgba(2, 6, 23, .72);
-      color: var(--text);
-      display: grid;
-      place-items: center;
-      cursor: pointer;
-      opacity: .86;
-      transition: transform .16s ease, opacity .16s ease, border-color .16s ease, background .16s ease;
-      z-index: 2;
-    }
-    .thumb-refresh:hover {
-      opacity: 1;
-      transform: translateY(-1px);
-      border-color: rgba(56, 189, 248, .76);
-      background: rgba(15, 23, 42, .92);
-    }
-    .thumb-refresh:disabled { opacity: .48; cursor: wait; transform: none; }
-    .thumb-refresh svg { width: 16px; height: 16px; }
-    .camera-meta-stack {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(112px, 178px));
-      gap: 8px;
-      align-items: center;
-    }
-    .camera-meta-stack .badge {
-      width: 100%;
-      justify-content: space-between;
-      border-radius: 8px;
-      min-height: 32px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .camera-actions-row {
-      display: flex;
-      align-items: center;
-      justify-content: flex-start;
-      gap: 12px;
-    }
-    .camera-status-badge {
-      position: absolute;
-      top: 13px;
-      right: 54px;
-    }
 
     .live-toolbar { margin-bottom: 14px; }
     .live-grid { display: grid; gap: 14px; }
@@ -492,7 +399,7 @@
       border-bottom: 1px solid var(--line);
       background: rgba(15, 23, 42, .72);
     }
-    .live-card iframe, .live-card img, .viewer-body iframe, .viewer-body img, .recording-card video {
+    .live-card iframe, .live-card img, .viewer-body iframe, .viewer-body img {
       width: 100%;
       aspect-ratio: 16 / 9;
       display: block;
@@ -500,38 +407,6 @@
       background: #000;
       object-fit: contain;
     }
-    .detail-live {
-      display: grid;
-      grid-template-columns: minmax(320px, 860px) minmax(220px, 1fr);
-      gap: 14px;
-      align-items: stretch;
-    }
-    .detail-live .live-card iframe,
-    .detail-live .live-card img {
-      height: min(42vh, 420px);
-      min-height: 240px;
-      aspect-ratio: auto;
-    }
-    .detail-side {
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background: rgba(2, 6, 23, .24);
-      padding: 14px;
-      display: grid;
-      align-content: start;
-      gap: 10px;
-    }
-
-    .event-thumb {
-      width: 92px;
-      height: 54px;
-      border-radius: 6px;
-      border: 1px solid var(--line);
-      background: #000;
-      object-fit: cover;
-      display: block;
-    }
-
     dialog {
       width: min(880px, calc(100vw - 28px));
       max-height: calc(100vh - 28px);
@@ -609,14 +484,6 @@
       .topbar { position: static; margin: -14px -14px 14px; padding: 14px; align-items: stretch; flex-direction: column; }
       .nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .cols-4, .cols-3, .cols-2, .form-grid, .form-grid.three, .live-grid.cols-2, .live-grid.cols-3 { grid-template-columns: 1fr; }
-      .detail-live { grid-template-columns: 1fr; }
-      .camera-list-card { grid-template-columns: 1fr; }
-      .camera-card-main { min-height: auto; }
-      .camera-meta-stack { grid-template-columns: 1fr; }
-      .camera-status-badge {
-        position: static;
-        width: fit-content;
-      }
       .span-2, .span-3 { grid-column: auto; }
       .top-actions, .actions, .split { align-items: stretch; flex-direction: column; }
       .btn, .status-chip { width: 100%; }
@@ -637,7 +504,7 @@
 
       <nav class="nav" aria-label="Primary">
         <button class="nav-btn active" data-view="dashboard" type="button"><span data-icon="layout"></span>Dashboard</button>
-        <button class="nav-btn" data-view="cameras" type="button"><span data-icon="camera"></span>Cameras</button>
+        <a class="nav-btn" href="/cameras"><span data-icon="camera"></span>Cameras</a>
         <button class="nav-btn" data-view="prompts" type="button"><span data-icon="file-text"></span>Prompts</button>
         <button class="nav-btn" data-view="live" type="button"><span data-icon="monitor"></span>Live View</button>
         <button class="nav-btn" data-view="settings" type="button"><span data-icon="settings"></span>Settings</button>
@@ -734,7 +601,7 @@
                 <h3>Camera Fleet</h3>
                 <p>Configured camera sources and current routing.</p>
               </div>
-              <button class="btn small" data-open-view="cameras" type="button">Manage</button>
+              <a class="btn small" href="/cameras">Manage</a>
             </div>
             <div id="dashboardCameras" class="stack"></div>
           </section>
@@ -745,21 +612,8 @@
                 <p>Open a camera to review its events, recordings, and live source.</p>
               </div>
             </div>
-            <div id="dashboardEvents" class="empty">Select a camera from the Cameras screen to view its detail timeline.</div>
+            <div id="dashboardEvents" class="empty">Open a camera from the Cameras screen to view its detail timeline.</div>
           </section>
-        </div>
-      </section>
-
-      <section id="view-cameras" class="view">
-        <div class="panel">
-          <div class="panel-head">
-            <div>
-              <h3>Cameras</h3>
-              <p>Add camera sources, assign prompts, and test verification.</p>
-            </div>
-            <button id="addCameraBtn" class="btn primary" type="button"><span data-icon="plus"></span>Add camera</button>
-          </div>
-          <div id="cameraGrid" class="grid cols-2"></div>
         </div>
       </section>
 
@@ -794,90 +648,6 @@
           </div>
         </div>
         <div id="liveGrid" class="live-grid cols-2"></div>
-      </section>
-
-      <section id="view-camera-detail" class="view">
-        <div class="panel" style="margin-bottom:14px;">
-          <div class="split">
-            <div>
-              <h3 id="cameraDetailName">Camera detail</h3>
-              <p id="cameraDetailMeta" class="muted">Select a camera to view its timeline.</p>
-            </div>
-            <div class="actions">
-              <button class="btn" data-open-view="cameras" type="button">Back to cameras</button>
-              <button id="detailSnapshotBtn" class="btn" type="button"><span data-icon="camera"></span>Snapshot</button>
-              <button id="detailTestAiBtn" class="btn primary" type="button"><span data-icon="spark"></span>Test AI</button>
-            </div>
-          </div>
-          <div id="cameraDetailLive" class="detail-live" style="margin-top:14px;"></div>
-        </div>
-
-        <div class="table-panel">
-          <div class="panel-head" style="padding:16px; margin:0;">
-            <div>
-              <h3>Camera Events</h3>
-              <p>Timeline filtered to the selected camera.</p>
-            </div>
-            <div class="actions">
-              <select id="eventFilterCamera" aria-label="Filter camera" style="width:170px;"><option value="">Select camera</option></select>
-              <select id="eventFilterAI" aria-label="Filter AI result" style="width:150px;">
-                <option value="">All AI results</option>
-                <option value="SAFE">SAFE</option>
-                <option value="EMERGENCY">EMERGENCY</option>
-                <option value="ERROR">ERROR</option>
-              </select>
-              <select id="eventPageSize" aria-label="Events per page" style="width:110px;">
-                <option value="10">10 rows</option>
-                <option value="25">25 rows</option>
-                <option value="50">50 rows</option>
-              </select>
-              <button id="refreshEventsBtn" class="btn" type="button"><span data-icon="refresh"></span>Refresh</button>
-              <button id="clearEventsBtn" class="btn danger" type="button"><span data-icon="trash"></span>Clear</button>
-            </div>
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead><tr><th>Evidence</th><th>Time</th><th>Camera</th><th>Status</th><th>AI</th><th>Description</th></tr></thead>
-              <tbody id="eventsBody"></tbody>
-            </table>
-          </div>
-          <div class="split" style="padding:12px 16px;">
-            <span id="eventsPageInfo" class="muted">Page 1</span>
-            <div class="actions">
-              <button id="prevPageBtn" class="btn small" type="button">Previous</button>
-              <button id="nextPageBtn" class="btn small" type="button">Next</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="panel" style="margin-top:14px;">
-          <div class="panel-head">
-            <div>
-              <h3>Camera Recordings</h3>
-              <p>Video evidence filtered to the selected camera.</p>
-            </div>
-            <div class="actions">
-              <select id="recordingFilterCamera" style="width:170px;"><option value="">Select camera</option></select>
-              <input id="recordingDateFrom" type="date" style="width:150px;" aria-label="Date from">
-              <input id="recordingDateTo" type="date" style="width:150px;" aria-label="Date to">
-              <select id="recordingPageSize" style="width:110px;" aria-label="Recordings per page">
-                <option value="6">6 rows</option>
-                <option value="12">12 rows</option>
-                <option value="24">24 rows</option>
-              </select>
-              <button id="refreshRecordingsBtn" class="btn" type="button"><span data-icon="refresh"></span>Refresh</button>
-              <button id="clearRecordingsBtn" class="btn danger" type="button"><span data-icon="trash"></span>Clear recordings</button>
-            </div>
-          </div>
-          <div id="recordingsGrid" class="grid cols-2"></div>
-          <div class="split" style="margin-top:14px;">
-            <span id="recordingsPageInfo" class="muted">Page 1</span>
-            <div class="actions">
-              <button id="prevRecordingPageBtn" class="btn small" type="button">Previous</button>
-              <button id="nextRecordingPageBtn" class="btn small" type="button">Next</button>
-            </div>
-          </div>
-        </div>
       </section>
 
       <section id="view-settings" class="view">
@@ -976,64 +746,6 @@
     </main>
   </div>
 
-  <dialog id="cameraDialog">
-    <div class="dialog-head">
-      <div><h3 id="cameraDialogTitle">Add camera</h3><p class="muted">Camera source and evidence options.</p></div>
-      <button class="btn small" data-close-dialog="cameraDialog" type="button">Close</button>
-    </div>
-    <div class="dialog-body">
-      <div class="form-grid">
-        <label class="check-row full"><input id="camEnabled" type="checkbox">Enabled</label>
-        <div class="field"><label for="camName">Tên camera / source go2rtc *</label><input id="camName" autocomplete="off" placeholder="h9c_cam1" required></div>
-        <div class="field"><label for="camPrompt">Prompt</label><select id="camPrompt"><option value="">Default prompt</option></select></div>
-        <div class="field full">
-          <label for="camGo2rtc">go2rtc frame URL hoặc source *</label>
-          <input id="camGo2rtc" autocomplete="off" placeholder="h9c_cam1 hoặc https://go2rtc.example/api/frame.jpeg?src=h9c_cam1">
-          <span class="help-text">Nguồn chính để lấy thumbnail, AI snapshot và monitor. Nếu chỉ nhập source ngắn, Settings phải có go2rtc URL chung. Nếu camera dùng hostname riêng, nhập full frame URL.</span>
-        </div>
-        <div class="field full">
-          <label for="camLive">go2rtc live URL</label>
-          <input id="camLive" autocomplete="off" placeholder="https://go2rtc.example/stream.html?src=h9c_cam1">
-          <span class="help-text">Tuỳ chọn. Nếu trống, web tự tạo live URL từ go2rtc URL chung và source.</span>
-        </div>
-        <div class="field full">
-          <label for="camRtsp">RTSP URL Camera (fallback)</label>
-          <input id="camRtsp" autocomplete="off" placeholder="rtsp://10.10.0.2:8554/h9c_cam1">
-          <span class="help-text">Chỉ dùng dự phòng khi không có go2rtc. Với HEVC/H.265 nên ưu tiên go2rtc để tránh live đen và log decode.</span>
-        </div>
-        <div class="field full">
-          <label for="camLiveMode">Chế độ live</label>
-          <select id="camLiveMode">
-            <option value="auto">Tự động: go2rtc iframe</option>
-            <option value="iframe">go2rtc iframe / MSE</option>
-            <option value="snapshot">Snapshot refresh cho HEVC</option>
-          </select>
-          <span class="help-text">HEVC/H.265 thường không hiển thị trong MSE trên browser. Chọn Snapshot refresh nếu màn hình live bị đen.</span>
-        </div>
-        <div class="field">
-          <label>Lưu trữ local</label>
-          <div class="stack">
-            <label class="check-row"><input id="camSaveImages" type="checkbox">Lưu ảnh sự kiện trên VPS</label>
-            <label class="check-row"><input id="camSaveVideos" type="checkbox">Lưu video ghi hình trên VPS</label>
-          </div>
-        </div>
-        <div class="field">
-          <label>Upload / ghi hình</label>
-          <div class="stack">
-            <label class="check-row"><input id="camUploadImages" type="checkbox">Upload ảnh sự kiện</label>
-            <label class="check-row"><input id="camRecordVideo" type="checkbox">Ghi và upload video</label>
-          </div>
-        </div>
-        <div class="field"><label for="camRecordSeconds">Thời lượng quay video (giây)</label><input id="camRecordSeconds" type="number" min="1"></div>
-        <div class="field"><label for="camRecordCooldown">Thời gian chờ trước lần quay tiếp theo (giây)</label><input id="camRecordCooldown" type="number" min="1"></div>
-      </div>
-    </div>
-    <div class="dialog-foot">
-      <button class="btn" data-close-dialog="cameraDialog" type="button">Cancel</button>
-      <button id="saveCameraBtn" class="btn primary" type="button">Save camera</button>
-    </div>
-  </dialog>
-
   <dialog id="promptDialog">
     <div class="dialog-head">
       <div><h3 id="promptDialogTitle">Add prompt</h3><p class="muted">Reusable AI verification instructions.</p></div>
@@ -1119,13 +831,7 @@
       config: {},
       cameras: [],
       prompts: [],
-      selectedCameraIndex: -1,
-      eventsPage: 1,
-      eventsTotal: 0,
-      recordingsPage: 1,
-      recordingsTotal: 0,
       liveLayout: "2",
-      editingCamera: -1,
       editingPrompt: -1,
       viewerUrl: "",
       viewerMode: "image",
@@ -1135,10 +841,8 @@
 
     const pages = {
       dashboard: ["Dashboard", "Monitor status, incidents, and system health."],
-      cameras: ["Cameras", "Manage sources, prompts, and evidence policy."],
       prompts: ["Prompts", "Reusable AI instructions for verification."],
       live: ["Live View", "Watch configured camera streams."],
-      "camera-detail": ["Camera Detail", "Review one camera timeline and recordings."],
       settings: ["Settings", "Configure AI, detection, alerts, and storage."],
       tools: ["Tools", "Run diagnostics and account updates."]
     };
@@ -1205,14 +909,6 @@
       $("toastStack").appendChild(toast);
       setTimeout(() => toast.remove(), 4200);
     }
-    function isHttpUrl(value) {
-      try {
-        const url = new URL(value);
-        return url.protocol === "http:" || url.protocol === "https:";
-      } catch {
-        return false;
-      }
-    }
     function go2rtcSourceFromInput(value) {
       const text = String(value || "").trim();
       if (!text) return "";
@@ -1222,14 +918,6 @@
       } catch {
         return text;
       }
-    }
-    function validateCamera(camera) {
-      if (!camera.name) return "Tên camera là bắt buộc.";
-      if (!camera.go2rtc_src && !camera.rtsp_url) return "Cần nhập go2rtc frame URL/source hoặc RTSP fallback.";
-      if (camera.go2rtc_src && !isHttpUrl(camera.go2rtc_src) && !String(state.config.go2rtc_url || "").trim()) {
-        return "Bạn đang nhập go2rtc source ngắn. Hãy cấu hình go2rtc URL trong Settings hoặc nhập full frame URL.";
-      }
-      return "";
     }
     function setBusy(button, busy, text) {
       if (!button) return;
@@ -1306,50 +994,32 @@
 
       const path = (raw.split(/[?#]/)[0] || "/").replace(/\/+$/, "") || "/";
       if (path === "/" || path === "/dashboard") return { view: "dashboard", camera: "" };
-      if (path === "/cameras") return { view: "cameras", camera: "" };
       if (path === "/prompts") return { view: "prompts", camera: "" };
       if (path === "/live") return { view: "live", camera: "" };
       if (path === "/settings") return { view: "settings", camera: "" };
       if (path === "/tools") return { view: "tools", camera: "" };
-      if (path.startsWith("/camera/")) {
-        let camera = path.slice("/camera/".length);
-        try { camera = decodeURIComponent(camera); } catch { /* Keep raw camera route. */ }
-        return { view: "camera-detail", camera };
-      }
       if (location.hash) return parseViewRoute(location.hash);
       return { view: "dashboard", camera: "" };
     }
 
-    function viewUrl(name, cameraRoute = "") {
+    function viewUrl(name) {
       if (name === "dashboard") return "/";
-      if (name === "camera-detail") return cameraRoute ? `/camera/${encodeURIComponent(cameraRoute)}` : "/cameras";
       return `/${name}`;
     }
 
     function switchView(name, options = {}) {
       const route = parseViewRoute(name);
       name = route.view;
-      if (name === "camera-detail" && route.camera) {
-        state.selectedCameraIndex = findCameraIndexByRouteName(route.camera);
-      }
       if (!pages[name]) name = "dashboard";
       document.querySelectorAll(".view").forEach(el => el.classList.toggle("active", el.id === `view-${name}`));
       document.querySelectorAll(".nav-btn").forEach(el => el.classList.toggle("active", el.dataset.view === name));
       setText("pageTitle", pages[name][0]);
       setText("pageSubtitle", pages[name][1]);
-      const cameraRoute = name === "camera-detail"
-        ? route.camera || (state.selectedCameraIndex >= 0 ? cameraName(state.cameras[state.selectedCameraIndex], state.selectedCameraIndex) : "")
-        : "";
-      const nextUrl = viewUrl(name, cameraRoute);
+      const nextUrl = viewUrl(name);
       const method = options.push ? "pushState" : "replaceState";
       if (location.pathname !== nextUrl) history[method](null, "", nextUrl);
-      if (name !== "live" && name !== "camera-detail") clearLiveRefreshTimers();
+      if (name !== "live") clearLiveRefreshTimers();
       if (name === "live") renderLive();
-      if (name === "camera-detail") {
-        renderCameraDetail();
-        loadEvents();
-        loadRecordings();
-      }
     }
 
     function collectConfig() {
@@ -1377,20 +1047,6 @@
     }
 
     function cameraName(camera, index) { return camera.name || camera.go2rtc_src || camera.rtsp_url || `Camera ${index + 1}`; }
-    function findCameraIndexByRouteName(routeName) {
-      const needle = String(routeName || "").trim();
-      if (!needle) return -1;
-      return state.cameras.findIndex((camera, index) => {
-        const aliases = [cameraName(camera, index), camera.name, camera.go2rtc_src, camera.rtsp_url, camera.live_url]
-          .filter(Boolean)
-          .map(value => String(value).trim());
-        return aliases.includes(needle);
-      });
-    }
-    function promptTitle(id) {
-      const prompt = state.prompts.find(item => item.id === id);
-      return prompt ? prompt.title || "Untitled prompt" : "Default prompt";
-    }
     function cameraSnapshotSignature(camera, index) {
       return [index, cameraName(camera, index), camera.rtsp_url || "", camera.go2rtc_src || "", camera.live_url || "", camera.live_mode || "auto"].join("|");
     }
@@ -1462,17 +1118,11 @@
       state.cameras = Array.isArray(state.config.cameras) ? state.config.cameras : [];
       state.prompts = Array.isArray(state.config.prompts) ? state.config.prompts : [];
       const route = parseViewRoute();
-      if (route.view === "camera-detail" && route.camera) {
-        state.selectedCameraIndex = findCameraIndexByRouteName(route.camera);
-      }
       fillSettings(state.config);
-      renderCameras();
       renderPrompts();
-      renderCameraFilters();
       renderDashboard();
       if (route.view === "live") renderLive();
       else clearLiveRefreshTimers();
-      if (route.view === "camera-detail") renderCameraDetail();
     }
 
     async function loadStatus() {
@@ -1520,200 +1170,8 @@
       }
     }
 
-    async function loadEvents() {
-      const limit = Number($("eventPageSize").value || 10);
-      const camera = state.selectedCameraIndex >= 0
-        ? cameraName(state.cameras[state.selectedCameraIndex], state.selectedCameraIndex)
-        : $("eventFilterCamera").value;
-      const params = new URLSearchParams({
-        page: String(state.eventsPage),
-        limit: String(limit),
-        ai_result: $("eventFilterAI").value,
-        camera
-      });
-      const data = await api(`/api/events?${params}`);
-      state.eventsTotal = data.total || 0;
-      renderEvents(data.events || [], state.eventsTotal, limit);
-    }
-
-    function renderEvents(events, total, limit) {
-      const body = $("eventsBody");
-      if (!events.length) {
-        body.innerHTML = '<tr><td colspan="6"><div class="empty">No events found.</div></td></tr>';
-      } else {
-        body.innerHTML = events.map(event => `
-          <tr>
-            <td>${event.image_url ? `<button class="btn small view-image" data-url="${esc(event.image_url)}" data-title="Event ${esc(event.id)}" type="button"><img class="event-thumb" src="${esc(event.image_url)}" loading="lazy" alt="Event image"></button>` : '<span class="badge">No image</span>'}</td>
-            <td class="mono">${esc(formatTimeUtc7(event.time || event.time_local))}</td>
-            <td>${esc(event.camera || "-")}</td>
-            <td><span class="badge ${badgeClass(event.status)}">${esc(event.status || "-")}</span></td>
-            <td><span class="badge ${badgeClass(event.ai_result)}">${esc(event.ai_result || "-")}</span></td>
-            <td>${esc(eventDescription(event))}</td>
-          </tr>
-        `).join("");
-      }
-      const totalPages = Math.max(1, Math.ceil(total / limit));
-      setText("eventsPageInfo", `Page ${state.eventsPage} of ${totalPages} · ${total} events`);
-      $("prevPageBtn").disabled = state.eventsPage <= 1;
-      $("nextPageBtn").disabled = state.eventsPage >= totalPages;
-    }
-
-    async function loadRecordings() {
-      const limit = Number($("recordingPageSize").value || 6);
-      const camera = state.selectedCameraIndex >= 0
-        ? cameraName(state.cameras[state.selectedCameraIndex], state.selectedCameraIndex)
-        : $("recordingFilterCamera").value;
-      const params = new URLSearchParams({
-        page: String(state.recordingsPage),
-        limit: String(limit),
-        camera,
-        date_from: $("recordingDateFrom").value,
-        date_to: $("recordingDateTo").value
-      });
-      const data = await api(`/api/recordings?${params}`);
-      state.recordingsTotal = data.total || 0;
-      renderRecordings(data.recordings || [], state.recordingsTotal, limit);
-    }
-
-    function renderRecordings(items, total, limit) {
-      const grid = $("recordingsGrid");
-      if (!items.length) {
-        grid.innerHTML = '<div class="empty">No recordings found for this filter.</div>';
-      } else {
-        grid.innerHTML = items.map(item => `
-          <article class="recording-card">
-            <video controls preload="metadata" src="${esc(item.video_url || "")}"></video>
-            <div class="split">
-              <div><b>${esc(item.camera || "Camera")}</b><p class="muted">${esc(formatTimeUtc7(item.time || item.time_local))}</p></div>
-              <a class="btn small" href="${esc(item.video_url || "#")}" target="_blank" rel="noopener">Open</a>
-            </div>
-          </article>
-        `).join("");
-      }
-      const totalPages = Math.max(1, Math.ceil(total / limit));
-      setText("recordingsPageInfo", `Page ${state.recordingsPage} of ${totalPages} · ${total} recordings`);
-      $("prevRecordingPageBtn").disabled = state.recordingsPage <= 1;
-      $("nextRecordingPageBtn").disabled = state.recordingsPage >= totalPages;
-    }
-
-    function renderCameraFilters() {
-      for (const id of ["eventFilterCamera", "recordingFilterCamera"]) {
-        const select = $(id);
-        const current = select.value;
-        select.innerHTML = '<option value="">Select camera</option>';
-        state.cameras.forEach(camera => {
-          const name = camera.name || camera.rtsp_url || camera.go2rtc_src;
-          if (!name) return;
-          const option = document.createElement("option");
-          option.value = name;
-          option.textContent = name;
-          select.appendChild(option);
-        });
-        select.value = current;
-      }
-    }
-
-    function selectCamera(index) {
-      if (index < 0 || index >= state.cameras.length) {
-        showToast("Camera not found.", "err");
-        return;
-      }
-      state.selectedCameraIndex = index;
-      state.eventsPage = 1;
-      state.recordingsPage = 1;
-      const name = cameraName(state.cameras[index], index);
-      $("eventFilterCamera").value = name;
-      $("recordingFilterCamera").value = name;
-      switchView(`/camera/${encodeURIComponent(name)}`, { push: true });
-    }
-
-    function renderCameraDetail() {
-      const index = state.selectedCameraIndex;
-      const camera = state.cameras[index];
-      if (!camera) {
-        setText("cameraDetailName", "Camera detail");
-        setText("cameraDetailMeta", "Select a camera to view its timeline.");
-        $("cameraDetailLive").innerHTML = '<div class="empty">No camera selected.</div>';
-        return;
-      }
-      const name = cameraName(camera, index);
-      setText("cameraDetailName", name);
-      setText("cameraDetailMeta", `${camera.enabled ? "Enabled" : "Disabled"} · ${camera.go2rtc_src || camera.rtsp_url || camera.live_url || "No source"}`);
-      $("eventFilterCamera").value = name;
-      $("recordingFilterCamera").value = name;
-
-      const source = liveSource(camera, index);
-      const container = $("cameraDetailLive");
-      clearLiveRefreshTimers();
-      container.innerHTML = "";
-      const card = document.createElement("article");
-      card.className = "live-card";
-      card.innerHTML = `<header><strong>${esc(name)}</strong><span class="badge">${esc(source.mode)}</span></header>`;
-      appendLiveMedia(card, source, name, index);
-      container.appendChild(card);
-      const side = document.createElement("aside");
-      side.className = "detail-side";
-      side.innerHTML = `
-        <div class="metric-line"><span>Status</span><b>${camera.enabled ? "Enabled" : "Disabled"}</b></div>
-        <div class="metric-line"><span>Prompt</span><b>${esc(promptTitle(camera.prompt_id))}</b></div>
-        <div class="metric-line"><span>Record</span><b>${camera.teldrive_record_enabled ? "On" : "Off"}</b></div>
-        <div class="metric-line"><span>go2rtc</span><b>${esc(camera.go2rtc_src || "-")}</b></div>
-        <div class="metric-line"><span>Live mode</span><b>${esc(source.mode)}</b></div>
-      `;
-      container.appendChild(side);
-    }
-
-    function renderCameras() {
-      renderDashboard();
-      renderCameraFilters();
-      const grid = $("cameraGrid");
-      if (!state.cameras.length) {
-        grid.innerHTML = '<div class="empty">No cameras configured. Use Add camera to create the first source.</div>';
-        return;
-      }
-      grid.innerHTML = state.cameras.map((camera, index) => `
-        <article class="camera-card camera-list-card">
-          <div class="camera-thumb camera-open" data-index="${index}" role="button" tabindex="0">
-            ${camera.rtsp_url || camera.go2rtc_src
-              ? `<img src="${esc(cameraSnapshotUrl(index))}" loading="lazy" alt="${esc(cameraName(camera, index))} snapshot" onerror="this.replaceWith(Object.assign(document.createElement('div'), {className: 'empty', textContent: 'Snapshot unavailable'}))"><button class="thumb-refresh camera-thumb-refresh" data-index="${index}" type="button" title="Refresh thumbnail" aria-label="Refresh ${esc(cameraName(camera, index))} thumbnail">${icons.refresh}</button>`
-              : '<div class="empty">No snapshot source</div>'}
-          </div>
-          <div class="camera-card-main">
-            <div class="camera-title camera-open" data-index="${index}" role="button" tabindex="0">
-              <div>
-                <h3>${esc(cameraName(camera, index))}</h3>
-                <p>${esc(camera.rtsp_url || camera.go2rtc_src || camera.live_url || "No source configured")}</p>
-              </div>
-            </div>
-            <div class="camera-meta-stack">
-              <span class="badge">Prompt: ${esc(promptTitle(camera.prompt_id))}</span>
-              <span class="badge ${camera.teldrive_record_enabled ? "info" : ""}">Record: ${camera.teldrive_record_enabled ? "On" : "Off"}</span>
-            </div>
-            <div class="camera-actions-row">
-              <div class="actions">
-                <button class="btn small camera-open-btn" data-index="${index}" type="button">Open detail</button>
-                <button class="btn small camera-toggle" data-index="${index}" type="button">${camera.enabled ? "Disable" : "Enable"}</button>
-                <button class="btn small camera-test" data-index="${index}" type="button">Test AI</button>
-                <button class="btn small camera-edit" data-index="${index}" type="button">Edit</button>
-                <button class="btn small danger camera-delete" data-index="${index}" type="button">Delete</button>
-              </div>
-            </div>
-          </div>
-          <span class="badge camera-status-badge ${camera.enabled ? "good" : "bad"}">${camera.enabled ? "Enabled" : "Disabled"}</span>
-        </article>
-      `).join("");
-    }
-
     function renderPrompts() {
       const grid = $("promptGrid");
-      const select = $("camPrompt");
-      select.innerHTML = '<option value="">Default prompt</option>';
-      state.prompts.forEach(prompt => {
-        const option = document.createElement("option");
-        option.value = prompt.id;
-        option.textContent = prompt.title || "Untitled prompt";
-        select.appendChild(option);
-      });
       if (!state.prompts.length) {
         grid.innerHTML = '<div class="empty">No custom prompts. Cameras will use the default verification prompt.</div>';
         return;
@@ -1763,36 +1221,11 @@
       state.cameras = Array.isArray(state.config.cameras) ? state.config.cameras : [];
       state.prompts = Array.isArray(state.config.prompts) ? state.config.prompts : [];
       fillSettings(state.config);
-      renderCameras();
       renderPrompts();
       if (parseViewRoute().view === "live") renderLive();
       setText(statusId, data.message || "Saved");
       showToast(data.message || "Settings saved", "ok");
       await loadStatus();
-    }
-
-    function openCameraDialog(index = -1) {
-      state.editingCamera = index;
-      const camera = index >= 0 ? state.cameras[index] : {
-        enabled: true, name: "", rtsp_url: "", go2rtc_src: "", live_url: "", live_mode: "auto", prompt_id: "",
-        local_save_images: true, local_save_videos: true, teldrive_upload_images: true, teldrive_record_enabled: false,
-        record_seconds: 10, record_cooldown: 300
-      };
-      setText("cameraDialogTitle", index >= 0 ? "Edit camera" : "Add camera");
-      $("camEnabled").checked = camera.enabled !== false;
-      $("camName").value = camera.name || "";
-      $("camRtsp").value = camera.rtsp_url || "";
-      $("camGo2rtc").value = camera.go2rtc_src || "";
-      $("camLive").value = camera.live_url || "";
-      $("camLiveMode").value = camera.live_mode || "auto";
-      $("camPrompt").value = camera.prompt_id || "";
-      $("camSaveImages").checked = camera.local_save_images !== false;
-      $("camSaveVideos").checked = camera.local_save_videos !== false;
-      $("camUploadImages").checked = camera.teldrive_upload_images !== false;
-      $("camRecordVideo").checked = camera.teldrive_record_enabled === true;
-      $("camRecordSeconds").value = camera.record_seconds || 10;
-      $("camRecordCooldown").value = camera.record_cooldown || 300;
-      $("cameraDialog").showModal();
     }
 
     function openPromptDialog(index = -1) {
@@ -1826,7 +1259,7 @@
 
     document.addEventListener("click", async event => {
       const nav = event.target.closest(".nav-btn");
-      if (nav) switchView(nav.dataset.view, { push: true });
+      if (nav && nav.dataset.view) switchView(nav.dataset.view, { push: true });
 
       const openView = event.target.closest("[data-open-view]");
       if (openView) switchView(openView.dataset.openView, { push: true });
@@ -1836,73 +1269,6 @@
 
       const imageBtn = event.target.closest(".view-image");
       if (imageBtn) showViewer(imageBtn.dataset.title || "Image", imageBtn.dataset.url, "image");
-
-      const openCamera = event.target.closest(".camera-open, .camera-open-btn");
-      if (openCamera && !event.target.closest("button:not(.camera-open-btn)")) {
-        selectCamera(Number(openCamera.dataset.index));
-      }
-
-      const editCamera = event.target.closest(".camera-edit");
-      if (editCamera) openCameraDialog(Number(editCamera.dataset.index));
-
-      const deleteCamera = event.target.closest(".camera-delete");
-      if (deleteCamera && await askConfirm({
-        title: "Delete camera",
-        message: "This removes the camera configuration from the web app.",
-        scope: cameraName(state.cameras[Number(deleteCamera.dataset.index)], Number(deleteCamera.dataset.index)),
-        detail: "Events and recordings already stored in the database are not removed.",
-        actionText: "Delete camera"
-      })) {
-        const index = Number(deleteCamera.dataset.index);
-        state.cameras.splice(index, 1);
-        if (state.selectedCameraIndex === index) state.selectedCameraIndex = -1;
-        else if (state.selectedCameraIndex > index) state.selectedCameraIndex--;
-        await saveConfig("actionStatus");
-      }
-
-      const toggleCamera = event.target.closest(".camera-toggle");
-      if (toggleCamera) {
-        const idx = Number(toggleCamera.dataset.index);
-        state.cameras[idx].enabled = !state.cameras[idx].enabled;
-        await saveConfig("actionStatus");
-      }
-
-      const thumbRefresh = event.target.closest(".camera-thumb-refresh");
-      if (thumbRefresh) {
-        event.preventDefault();
-        event.stopPropagation();
-        const index = Number(thumbRefresh.dataset.index);
-        const thumb = thumbRefresh.closest(".camera-thumb");
-        const img = thumb ? thumb.querySelector("img") : null;
-        if (!img) return;
-        setBusy(thumbRefresh, true);
-        img.src = cameraSnapshotUrl(index, true);
-        img.onload = () => setBusy(thumbRefresh, false);
-        img.onerror = () => {
-          setBusy(thumbRefresh, false);
-          showToast("Snapshot refresh failed.", "err");
-        };
-        return;
-      }
-
-      const snapshot = event.target.closest(".camera-snapshot");
-      if (snapshot) showViewer(`Snapshot: ${cameraName(state.cameras[Number(snapshot.dataset.index)], Number(snapshot.dataset.index))}`, cameraSnapshotUrl(Number(snapshot.dataset.index), true), "image");
-
-      const test = event.target.closest(".camera-test");
-      if (test) {
-        const index = Number(test.dataset.index);
-        setBusy(test, true, "Testing...");
-        try {
-          const data = await api(`/api/test-ai-camera?index=${index}`, { method: "POST", timeout: 150000 });
-          $("toolResult").textContent = JSON.stringify(data, null, 2);
-          showToast(`AI test complete: ${data.result || "done"}`, "ok");
-          switchView("tools", { push: true });
-        } catch (err) {
-          showToast(err.message, "err");
-        } finally {
-          setBusy(test, false);
-        }
-      }
 
       const editPrompt = event.target.closest(".prompt-edit");
       if (editPrompt) openPromptDialog(Number(editPrompt.dataset.index));
@@ -1919,43 +1285,6 @@
         state.cameras.forEach(camera => { if (camera.prompt_id === removed.id) camera.prompt_id = ""; });
         await saveConfig("configStatus");
       }
-    });
-
-    document.addEventListener("keydown", event => {
-      const openCamera = event.target.closest && event.target.closest(".camera-open");
-      if (!openCamera) return;
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        selectCamera(Number(openCamera.dataset.index));
-      }
-    });
-
-    $("addCameraBtn").addEventListener("click", () => openCameraDialog(-1));
-    $("saveCameraBtn").addEventListener("click", async () => {
-      const camera = {
-        enabled: $("camEnabled").checked,
-        name: $("camName").value.trim(),
-        rtsp_url: $("camRtsp").value.trim(),
-        go2rtc_src: $("camGo2rtc").value.trim(),
-        live_url: $("camLive").value.trim(),
-        live_mode: $("camLiveMode").value,
-        prompt_id: $("camPrompt").value,
-        local_save_images: $("camSaveImages").checked,
-        local_save_videos: $("camSaveVideos").checked,
-        teldrive_upload_images: $("camUploadImages").checked,
-        teldrive_record_enabled: $("camRecordVideo").checked,
-        record_seconds: Math.max(1, Number($("camRecordSeconds").value || 10)),
-        record_cooldown: Math.max(1, Number($("camRecordCooldown").value || 300))
-      };
-      const validation = validateCamera(camera);
-      if (validation) {
-        showToast(validation, "warn");
-        return;
-      }
-      if (state.editingCamera >= 0) state.cameras[state.editingCamera] = camera;
-      else state.cameras.push(camera);
-      $("cameraDialog").close();
-      await saveConfig("actionStatus");
     });
 
     $("addPromptBtn").addEventListener("click", () => openPromptDialog(-1));
@@ -2027,94 +1356,12 @@
     $("captureBtn").addEventListener("click", () => monitorAction("/api/capture", $("captureBtn"), "Snapshot captured"));
     $("refreshBtn").addEventListener("click", async () => {
       await loadStatus();
-      if (parseViewRoute().view === "camera-detail") await Promise.all([loadEvents().catch(() => {}), loadRecordings().catch(() => {})]);
       showToast("Dashboard refreshed", "ok");
     });
     $("testAiQuickBtn").addEventListener("click", () => $("testAiBtn").click());
 
     $("liveLayoutSelect").addEventListener("change", event => { state.liveLayout = event.target.value; renderLive(); });
     $("refreshLiveBtn").addEventListener("click", renderLive);
-    $("detailSnapshotBtn").addEventListener("click", () => {
-      const index = state.selectedCameraIndex;
-      if (index < 0) return showToast("Select a camera first.", "warn");
-      showViewer(`Snapshot: ${cameraName(state.cameras[index], index)}`, cameraSnapshotUrl(index, true), "image");
-    });
-    $("detailTestAiBtn").addEventListener("click", async () => {
-      const index = state.selectedCameraIndex;
-      if (index < 0) return showToast("Select a camera first.", "warn");
-      const btn = $("detailTestAiBtn");
-      setBusy(btn, true, "Testing...");
-      try {
-        const data = await api(`/api/test-ai-camera?index=${index}`, { method: "POST", timeout: 150000 });
-        $("toolResult").textContent = JSON.stringify(data, null, 2);
-        showToast(`AI test complete: ${data.result || "done"}`, "ok");
-        await loadEvents();
-      } catch (err) {
-        showToast(err.message, "err");
-      } finally {
-        setBusy(btn, false);
-      }
-    });
-
-    $("refreshEventsBtn").addEventListener("click", () => { state.eventsPage = 1; loadEvents().catch(err => showToast(err.message, "err")); });
-    $("eventFilterCamera").addEventListener("change", () => { state.eventsPage = 1; loadEvents(); });
-    $("eventFilterAI").addEventListener("change", () => { state.eventsPage = 1; loadEvents(); });
-    $("eventPageSize").addEventListener("change", () => { state.eventsPage = 1; loadEvents(); });
-    $("prevPageBtn").addEventListener("click", () => { if (state.eventsPage > 1) { state.eventsPage--; loadEvents(); } });
-    $("nextPageBtn").addEventListener("click", () => { state.eventsPage++; loadEvents(); });
-    $("clearEventsBtn").addEventListener("click", async () => {
-      const index = state.selectedCameraIndex;
-      const camera = index >= 0 ? cameraName(state.cameras[index], index) : $("eventFilterCamera").value;
-      if (!camera) {
-        showToast("Select a camera before clearing events.", "warn");
-        return;
-      }
-      const ok = await askConfirm({
-        title: "Clear camera events",
-        message: "Delete event timeline records for this camera.",
-        scope: camera,
-        detail: "Recordings are not cleared by this action. Use Clear recordings separately.",
-        actionText: "Clear events"
-      });
-      if (!ok) return;
-      try {
-        const data = await api(`/api/events?camera=${encodeURIComponent(camera)}`, { method: "DELETE" });
-        showToast(data.message || "Events cleared", "ok");
-        state.eventsPage = 1;
-        await Promise.all([loadEvents(), loadStatus()]);
-      } catch (err) { showToast(err.message, "err"); }
-    });
-
-    $("refreshRecordingsBtn").addEventListener("click", () => { state.recordingsPage = 1; loadRecordings(); });
-    $("recordingFilterCamera").addEventListener("change", () => { state.recordingsPage = 1; loadRecordings(); });
-    $("recordingDateFrom").addEventListener("change", () => { state.recordingsPage = 1; loadRecordings(); });
-    $("recordingDateTo").addEventListener("change", () => { state.recordingsPage = 1; loadRecordings(); });
-    $("recordingPageSize").addEventListener("change", () => { state.recordingsPage = 1; loadRecordings(); });
-    $("prevRecordingPageBtn").addEventListener("click", () => { if (state.recordingsPage > 1) { state.recordingsPage--; loadRecordings(); } });
-    $("nextRecordingPageBtn").addEventListener("click", () => { state.recordingsPage++; loadRecordings(); });
-    $("clearRecordingsBtn").addEventListener("click", async () => {
-      const index = state.selectedCameraIndex;
-      const camera = index >= 0 ? cameraName(state.cameras[index], index) : $("recordingFilterCamera").value;
-      if (!camera) {
-        showToast("Select a camera before clearing recordings.", "warn");
-        return;
-      }
-      const ok = await askConfirm({
-        title: "Clear camera recordings",
-        message: "Delete recording records for this camera.",
-        scope: camera,
-        detail: "Camera events without video are not cleared by this action.",
-        actionText: "Clear recordings"
-      });
-      if (!ok) return;
-      try {
-        const data = await api(`/api/recordings?camera=${encodeURIComponent(camera)}`, { method: "DELETE" });
-        showToast(data.message || "Recordings cleared", "ok");
-        state.recordingsPage = 1;
-        await Promise.all([loadRecordings(), loadStatus()]);
-      } catch (err) { showToast(err.message, "err"); }
-    });
-
     $("testAiBtn").addEventListener("click", async () => {
       const btn = $("testAiBtn");
       setBusy(btn, true, "Testing...");
@@ -2186,19 +1433,10 @@
       try {
         await loadConfig();
         await loadStatus();
-        if (parseViewRoute().view === "camera-detail") {
-          await loadEvents();
-          await loadRecordings();
-        }
       } catch (err) {
         showToast(err.message || "Failed to load application data", "err");
       }
       setInterval(() => loadStatus().catch(() => {}), 5000);
-      setInterval(() => {
-        if (parseViewRoute().view === "camera-detail") {
-          loadEvents().catch(() => {});
-        }
-      }, 15000);
     })();
   </script>
 </body>
