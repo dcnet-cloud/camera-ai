@@ -23,7 +23,7 @@ import monitor
 import teldrive
 
 logger = logging.getLogger("fall_detection_web")
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data"
