@@ -180,6 +180,34 @@ def go2rtc_frame_request(config: dict[str, Any], camera: dict[str, Any]) -> tupl
     return f"{base_url}/api/frame.jpeg", {"src": src}, src
 
 
+def fetch_go2rtc_frame_bytes(config: dict[str, Any], camera: dict[str, Any], timeout: int, attempts: int = 3) -> tuple[bytes, str]:
+    frame_url, params, src = go2rtc_frame_request(config, camera)
+    headers = {
+        "Accept": "image/jpeg,image/*;q=0.9,*/*;q=0.8",
+        "Cache-Control": "no-cache",
+    }
+    last_error = ""
+    for attempt in range(1, attempts + 1):
+        request_params = dict(params)
+        request_params["_ts"] = str(int(time.time() * 1000))
+        try:
+            response = requests.get(
+                frame_url,
+                params=request_params,
+                headers=headers,
+                timeout=timeout,
+            )
+            response.raise_for_status()
+            if response.content:
+                return response.content, src
+            last_error = "empty response body"
+        except requests.RequestException as exc:
+            last_error = str(exc)
+        if attempt < attempts:
+            time.sleep(0.25 * attempt)
+    raise ValueError(f"go2rtc returned empty frame after {attempts} attempts: {last_error}")
+
+
 def go2rtc_api_base(config: dict[str, Any], camera: dict[str, Any]) -> str:
     base_url = str(config.get("go2rtc_url", "")).strip().rstrip("/")
     if base_url:
@@ -354,18 +382,10 @@ def capture_snapshot(config: dict[str, Any], output_path: Path = SNAPSHOT_PATH) 
 
 
 def capture_go2rtc_snapshot(config: dict[str, Any], camera: dict[str, Any], output_path: Path) -> Path:
-    frame_url, params, src = go2rtc_frame_request(config, camera)
+    content, src = fetch_go2rtc_frame_bytes(config, camera, timeout=10, attempts=4)
     logger.info("[SNAPSHOT] go2rtc src=%s", src)
-    response = requests.get(
-        frame_url,
-        params=params,
-        timeout=10,
-    )
-    response.raise_for_status()
-    if not response.content:
-        raise ValueError("go2rtc returned empty snapshot")
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    output_path.write_bytes(response.content)
+    output_path.write_bytes(content)
     return output_path
 
 
@@ -373,17 +393,8 @@ def read_go2rtc_frame(config: dict[str, Any], camera: dict[str, Any]):
     import cv2
     import numpy as np
 
-    frame_url, params, _src = go2rtc_frame_request(config, camera)
-
-    response = requests.get(
-        frame_url,
-        params=params,
-        timeout=8,
-    )
-    response.raise_for_status()
-    if not response.content:
-        raise RuntimeError("go2rtc returned empty frame")
-    image = np.frombuffer(response.content, dtype=np.uint8)
+    content, _src = fetch_go2rtc_frame_bytes(config, camera, timeout=8, attempts=3)
+    image = np.frombuffer(content, dtype=np.uint8)
     frame = cv2.imdecode(image, cv2.IMREAD_COLOR)
     if frame is None:
         raise RuntimeError("Could not decode go2rtc JPEG frame")
