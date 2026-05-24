@@ -612,7 +612,7 @@
         const hasSnapshot = camera.rtsp_url || camera.go2rtc_src || camera.name;
         const thumbClass = hasSnapshot ? "thumb loading" : "thumb";
         return `
-          <article class="camera-card">
+          <article class="camera-card" data-index="${index}">
             <div class="${thumbClass}">
               ${hasSnapshot
                 ? `<div class="thumb-loader" aria-hidden="true"><span class="terminal-lines"></span></div><img src="${esc(snapshotUrl(index))}" loading="lazy" data-render-seq="${renderSeq}" alt="${esc(name)} snapshot" onload="if (Number(this.dataset.renderSeq) === state.renderSeq) this.closest('.thumb')?.classList.remove('loading')" onerror="if (Number(this.dataset.renderSeq) === state.renderSeq) { this.closest('.thumb')?.classList.remove('loading'); this.replaceWith(Object.assign(document.createElement('div'), {className: 'empty', textContent: 'Snapshot unavailable'})); }"><button class="thumb-refresh" data-refresh-thumb="${index}" type="button" title="Refresh thumbnail" aria-label="Refresh ${esc(name)} thumbnail">${icons.refresh}</button>`
@@ -638,6 +638,60 @@
           </article>`;
       }).join("");
     }
+    
+    function updateCameraCard(index) {
+      const card = document.querySelector(`.camera-card[data-index="${index}"]`);
+      if (!card) return;
+      const camera = state.cameras[index];
+      const name = cameraName(camera, index);
+      const renderSeq = state.renderSeq;
+      
+      const statusBadge = card.querySelector(".status");
+      if (statusBadge) {
+        statusBadge.className = `badge status ${camera.enabled ? "good" : "bad"}`;
+        statusBadge.textContent = camera.enabled ? "Enabled" : "Disabled";
+      }
+      
+      const toggleBtn = card.querySelector("[data-toggle]");
+      if (toggleBtn) {
+        toggleBtn.textContent = camera.enabled ? "Disable" : "Enable";
+      }
+      
+      const title = card.querySelector(".camera-main h3");
+      if (title) title.textContent = name;
+      
+      const sourceText = card.querySelector(".camera-main .source");
+      if (sourceText) {
+        sourceText.textContent = camera.rtsp_url || camera.go2rtc_src || camera.live_url || "No source configured";
+      }
+      
+      const badges = card.querySelectorAll(".meta .badge");
+      if (badges.length >= 2) {
+        badges[0].textContent = `Prompt: ${promptTitle(camera.prompt_id)}`;
+        badges[1].className = `badge ${camera.teldrive_record_enabled ? "good" : ""}`;
+        badges[1].textContent = `Record: ${camera.teldrive_record_enabled ? "On" : "Off"}`;
+      }
+      
+      const thumb = card.querySelector(".thumb");
+      const img = thumb ? thumb.querySelector("img") : null;
+      const hasSnapshot = camera.rtsp_url || camera.go2rtc_src || camera.name;
+      
+      if (hasSnapshot) {
+        const newUrl = snapshotUrl(index);
+        if (!img || img.getAttribute("src") !== newUrl) {
+          if (thumb) {
+            thumb.className = "thumb loading";
+            thumb.innerHTML = `<div class="thumb-loader" aria-hidden="true"><span class="terminal-lines"></span></div><img src="${esc(newUrl)}" loading="lazy" data-render-seq="${renderSeq}" alt="${esc(name)} snapshot" onload="if (Number(this.dataset.renderSeq) === state.renderSeq) this.closest('.thumb')?.classList.remove('loading')" onerror="if (Number(this.dataset.renderSeq) === state.renderSeq) { this.closest('.thumb')?.classList.remove('loading'); this.replaceWith(Object.assign(document.createElement('div'), {className: 'empty', textContent: 'Snapshot unavailable'})); }"><button class="thumb-refresh" data-refresh-thumb="${index}" type="button" title="Refresh thumbnail" aria-label="Refresh ${esc(name)} thumbnail">${icons.refresh}</button>`;
+          }
+        }
+      } else {
+        if (thumb) {
+          thumb.className = "thumb";
+          thumb.innerHTML = '<div class="empty">No snapshot source</div>';
+        }
+      }
+    }
+    
     async function loadCameras() {
       cancelThumbnailLoads();
       const data = await api("/api/cameras");
@@ -646,8 +700,11 @@
       state.go2rtcUrl = data.go2rtc_url || "";
       render();
     }
-    async function saveCameras() {
-      cancelThumbnailLoads();
+    
+    async function saveCameras(indexToUpdate = -1) {
+      if (indexToUpdate === -1) {
+        cancelThumbnailLoads();
+      }
       const data = await api("/api/cameras", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -656,7 +713,12 @@
       state.cameras = Array.isArray(data.cameras) ? data.cameras : [];
       state.prompts = Array.isArray(data.prompts) ? data.prompts : [];
       state.go2rtcUrl = data.go2rtc_url || "";
-      render();
+      
+      if (indexToUpdate >= 0 && indexToUpdate < state.cameras.length) {
+        updateCameraCard(indexToUpdate);
+      } else {
+        render();
+      }
       showToast(data.message || "Cameras saved", "ok");
     }
     function openDialog(index = -1) {
@@ -730,12 +792,12 @@
       if (toggle) {
         const index = Number(toggle.dataset.toggle);
         state.cameras[index].enabled = !state.cameras[index].enabled;
-        await saveCameras();
+        await saveCameras(index);
       }
       const del = event.target.closest("[data-delete]");
       if (del && confirm("Delete this camera?")) {
         state.cameras.splice(Number(del.dataset.delete), 1);
-        await saveCameras();
+        await saveCameras(-1);
       }
       const close = event.target.closest("[data-close-dialog]");
       if (close) $(close.dataset.closeDialog).close();
@@ -754,10 +816,11 @@
         showToast(validation, "err");
         return;
       }
-      if (state.editing >= 0) state.cameras[state.editing] = camera;
+      const editIndex = state.editing;
+      if (editIndex >= 0) state.cameras[editIndex] = camera;
       else state.cameras.push(camera);
       $("cameraDialog").close();
-      await saveCameras();
+      await saveCameras(editIndex);
     });
 
     loadCameras().catch(err => showToast(err.message || "Could not load cameras", "err"));
