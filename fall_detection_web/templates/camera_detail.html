@@ -932,11 +932,14 @@
         <article class="recording-card">
           ${mediaHtml}
           <footer>
-            <div>
-              <b>${name}</b>
-              <p class="muted">${esc(timeStr)}</p>
+            <div style="min-width: 0; flex: 1;">
+              <b class="truncate" style="display: block;">${name}</b>
+              <p class="muted small">${esc(timeStr)}</p>
             </div>
-            <a class="btn small" href="${esc(item.video_url || "#")}" target="_blank" rel="noopener">Open</a>
+            <div class="actions" style="flex-shrink: 0; display: flex; gap: 6px;">
+              <button class="btn small play-recording" data-url="${esc(item.video_url || "")}" data-title="${name} - ${esc(timeStr)}" type="button">Play</button>
+              <button class="btn small copy-link" data-url="${esc(item.video_url || "")}" type="button" title="Copy video link"><svg viewBox="0 0 24 24" style="width: 15px; height: 15px; stroke: currentColor; stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round;"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+            </div>
           </footer>
         </article>`;
       }).join("") : '<div class="empty">No recordings found for this filter.</div>';
@@ -1157,6 +1160,19 @@
       const eventImg = event.target.closest(".view-event-image");
       if (eventImg) {
         showViewer(eventImg.dataset.title, eventImg.dataset.url, "image");
+      }
+      const copyBtn = event.target.closest(".copy-link");
+      if (copyBtn) {
+        const url = copyBtn.dataset.url;
+        if (url) {
+          const absoluteUrl = new URL(url, window.location.origin).href;
+          navigator.clipboard.writeText(absoluteUrl).then(() => {
+            showToast("Copied video link to clipboard!", "ok");
+          }).catch(err => {
+            showToast("Failed to copy link", "err");
+            console.error(err);
+          });
+        }
       }
       const closer = event.target.closest("[data-close-dialog]");
       if (closer) {
