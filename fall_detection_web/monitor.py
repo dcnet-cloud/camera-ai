@@ -270,16 +270,18 @@ def record_go2rtc_clip(config: dict[str, Any], camera: dict[str, Any], output_pa
         return None
 
     seconds = int(camera.get("record_seconds", config.get("teldrive_record_seconds", 10)))
+    # Add 6 seconds padding to compensate for initial Keyframe (I-frame) wait time
+    request_seconds = seconds + 6
     response = requests.get(
         f"{base_url}/api/stream.mp4",
         params={
             "src": video_only_source(src),
-            "duration": seconds,
+            "duration": request_seconds,
             "filename": output_path.name,
             "video": "h264,h265,hevc",
         },
         stream=True,
-        timeout=seconds + 30,
+        timeout=request_seconds + 30,
     )
     response.raise_for_status()
     output_path.parent.mkdir(parents=True, exist_ok=True)
