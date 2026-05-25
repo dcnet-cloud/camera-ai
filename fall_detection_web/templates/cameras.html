@@ -448,6 +448,9 @@
         </div>
         <div class="actions">
           <button id="refreshBtn" class="btn" type="button"><span data-icon="refresh"></span>Refresh</button>
+          <button id="exportCamerasBtn" class="btn" type="button"><span data-icon="download"></span>Export</button>
+          <button id="importCamerasBtn" class="btn" type="button"><span data-icon="upload"></span>Import</button>
+          <input type="file" id="importCamerasFile" class="hidden" accept=".json" style="display:none;">
           <button id="addBtn" class="btn primary" type="button"><span data-icon="plus"></span>Add camera</button>
         </div>
       </header>
@@ -532,7 +535,9 @@
     const icons = {
       shield: '<svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6l7-3z"/><path d="M9 12l2 2 4-5"/></svg>',
       plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
-      refresh: '<svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 1-15.4 6.4L3 16"/><path d="M3 21v-5h5"/><path d="M3 12A9 9 0 0 1 18.4 5.6L21 8"/><path d="M21 3v5h-5"/></svg>'
+      refresh: '<svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 1-15.4 6.4L3 16"/><path d="M3 21v-5h5"/><path d="M3 12A9 9 0 0 1 18.4 5.6L21 8"/><path d="M21 3v5h-5"/></svg>',
+      download: '<svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
+      upload: '<svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>'
     };
     document.querySelectorAll("[data-icon]").forEach(el => { el.innerHTML = icons[el.dataset.icon] || ""; });
 
@@ -575,6 +580,19 @@
       return data;
     }
     function cameraName(camera, index) { return camera.name || camera.go2rtc_src || camera.rtsp_url || `Camera ${index + 1}`; }
+    function go2rtcSourceFromInput(value) {
+      const text = String(value || "").trim();
+      if (!text) return "";
+      try { const url = new URL(text); return url.searchParams.get("src") || url.pathname.replace(/\/+$/, "").split("/").pop() || ""; } catch { return text; }
+    }
+    function getGo2rtcDisplay(camera) {
+      const src = go2rtcSourceFromInput(camera.go2rtc_src);
+      if (!src) return "No go2rtc source";
+      if (src.length > 25) {
+        return src.slice(0, 22) + "...";
+      }
+      return src;
+    }
     function promptTitle(id) {
       const prompt = state.prompts.find(item => item.id === id);
       return prompt ? prompt.title || "Untitled prompt" : "Default prompt";
@@ -642,7 +660,7 @@
             <div class="camera-main">
               <div>
                 <h3>${esc(name)}</h3>
-                <p class="source">${esc(camera.rtsp_url || camera.go2rtc_src || camera.live_url || "No source configured")}</p>
+                <p class="source">go2rtc: ${esc(getGo2rtcDisplay(camera))}</p>
               </div>
               <div class="meta">
                 <span class="badge">Prompt: ${esc(promptTitle(camera.prompt_id))}</span>
@@ -862,6 +880,66 @@
       else state.cameras.push(camera);
       $("cameraDialog").close();
       await saveCameras(editIndex);
+    });
+
+    // Export Cameras
+    $("exportCamerasBtn").addEventListener("click", () => {
+      try {
+        const jsonString = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(state.cameras, null, 2));
+        const downloadAnchor = document.createElement("a");
+        downloadAnchor.setAttribute("href", jsonString);
+        downloadAnchor.setAttribute("download", "cameras_config.json");
+        document.body.appendChild(downloadAnchor);
+        downloadAnchor.click();
+        downloadAnchor.remove();
+        showToast("Đã xuất cấu hình camera thành công!", "ok");
+      } catch (err) {
+        showToast("Xuất cấu hình thất bại: " + err.message, "err");
+      }
+    });
+
+    // Import Cameras trigger
+    $("importCamerasBtn").addEventListener("click", () => {
+      $("importCamerasFile").click();
+    });
+
+    // Handle File select for Import
+    $("importCamerasFile").addEventListener("change", event => {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = async e => {
+        try {
+          const imported = JSON.parse(e.target.result);
+          if (!Array.isArray(imported)) {
+            throw new Error("Dữ liệu cấu hình camera phải là một danh sách (Array).");
+          }
+          const invalid = imported.some(c => !c.name);
+          if (invalid) {
+            throw new Error("Mỗi camera trong danh sách phải có thuộc tính 'name'.");
+          }
+
+          if (confirm("Bạn có muốn THAY THẾ toàn bộ camera hiện tại bằng cấu hình mới? \n\n- Nhấp OK: Thay thế hoàn toàn.\n- Nhấp Cancel: Gộp mới (những camera trùng tên sẽ ghi đè, camera mới sẽ được thêm vào).")) {
+            state.cameras = imported;
+          } else {
+            imported.forEach(newCam => {
+              const idx = state.cameras.findIndex(c => c.name === newCam.name);
+              if (idx >= 0) {
+                state.cameras[idx] = newCam;
+              } else {
+                state.cameras.push(newCam);
+              }
+            });
+          }
+          await saveCameras(-1);
+          showToast("Đã nhập cấu hình camera thành công!", "ok");
+        } catch (err) {
+          showToast("Nhập cấu hình thất bại: " + err.message, "err");
+        } finally {
+          $("importCamerasFile").value = "";
+        }
+      };
+      reader.readAsText(file);
     });
 
     loadCameras().catch(err => showToast(err.message || "Could not load cameras", "err"));

@@ -830,6 +830,9 @@
             <div class="split">
               <div><h3>Lưu cấu hình</h3><p class="muted">Cấu hình lưu vào SQLite. Monitor sẽ tự restart khi cần.</p></div>
               <div class="actions">
+                <button id="exportConfigBtn" class="btn" type="button"><span data-icon="download"></span>Export Settings</button>
+                <button id="importConfigBtn" class="btn" type="button"><span data-icon="upload"></span>Import Settings</button>
+                <input type="file" id="importConfigFile" class="hidden" accept=".json" style="display:none;">
                 <button id="reloadConfigBtn" class="btn" type="button"><span data-icon="refresh"></span>Tải lại</button>
                 <button id="saveConfigBtn" class="btn primary" type="submit"><span data-icon="save"></span>Lưu cài đặt</button>
               </div>
@@ -949,7 +952,9 @@
       check: '<svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>',
       save: '<svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>',
       send: '<svg viewBox="0 0 24 24"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/></svg>',
-      trash: '<svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>'
+      trash: '<svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>',
+      download: '<svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
+      upload: '<svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>'
     };
 
     document.querySelectorAll("[data-icon]").forEach(el => { el.innerHTML = icons[el.dataset.icon] || ""; });
@@ -1673,6 +1678,58 @@
       finally { setBusy(btn, false); }
     });
     $("reloadConfigBtn").addEventListener("click", () => loadConfig().then(() => showToast("Configuration reloaded", "ok")).catch(err => showToast(err.message, "err")));
+
+    // Export Settings
+    $("exportConfigBtn").addEventListener("click", () => {
+      try {
+        const config = collectConfig();
+        delete config.cameras;
+        delete config.prompts;
+        const jsonString = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(config, null, 2));
+        const downloadAnchor = document.createElement("a");
+        downloadAnchor.setAttribute("href", jsonString);
+        downloadAnchor.setAttribute("download", "settings_config.json");
+        document.body.appendChild(downloadAnchor);
+        downloadAnchor.click();
+        downloadAnchor.remove();
+        showToast("Đã xuất cấu hình cài đặt thành công!", "ok");
+      } catch (err) {
+        showToast("Xuất cấu hình cài đặt thất bại: " + err.message, "err");
+      }
+    });
+
+    // Import Settings trigger
+    $("importConfigBtn").addEventListener("click", () => {
+      $("importConfigFile").click();
+    });
+
+    // Handle File select for Import Settings
+    $("importConfigFile").addEventListener("change", event => {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = async e => {
+        try {
+          const imported = JSON.parse(e.target.result);
+          if (typeof imported !== "object" || imported === null) {
+            throw new Error("Dữ liệu cài đặt không hợp lệ.");
+          }
+          const hasVision = "vision_model" in imported || "go2rtc_url" in imported;
+          if (!hasVision) {
+            throw new Error("Tệp không phải là cấu hình cài đặt hợp lệ.");
+          }
+          
+          fillSettings(imported);
+          showToast("Đã nạp cấu hình cài đặt. Nhấp 'Lưu cài đặt' để áp dụng!", "ok");
+        } catch (err) {
+          showToast("Nhập cấu hình cài đặt thất bại: " + err.message, "err");
+        } finally {
+          $("importConfigFile").value = "";
+        }
+      };
+      reader.readAsText(file);
+    });
+
     $("checkTeldriveBtn").addEventListener("click", async () => {
       const btn = $("checkTeldriveBtn");
       setBusy(btn, true, "Checking...");
