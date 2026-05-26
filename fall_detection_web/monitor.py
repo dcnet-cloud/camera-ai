@@ -17,6 +17,7 @@ os.environ.setdefault("OPENCV_LOG_LEVEL", "ERROR")
 
 from ai import send_telegram, verify_scene
 from config import get_camera, normalize_cameras, require_config
+import db
 from db import insert_event, now_iso
 import teldrive
 
@@ -118,6 +119,8 @@ def upload_event_video_safe(config: dict[str, Any], video_path: Path, camera_nam
         file_data = teldrive.upload_event_video(config, video_path, camera_name)
         video_id = str(file_data.get("id", ""))
         video_name = str(file_data.get("name", ""))
+        if not video_id or not video_name:
+            raise RuntimeError("Teldrive upload did not return file id/name")
         insert_event(
             "teldrive_video_uploaded",
             camera=camera_name,
@@ -146,6 +149,34 @@ def cleanup_recording_if_needed(camera: dict[str, Any], video_path: Path, upload
         logger.info("[RECORD] removed local clip after upload file=%s", video_path.name)
     except OSError as exc:
         logger.warning("[RECORD] could not remove local clip file=%s error=%s", video_path.name, exc)
+
+
+def cleanup_uploaded_local_clips(config: dict[str, Any]) -> int:
+    if not CLIPS_DIR.exists():
+        return 0
+    keep_local_by_camera = {
+        str(camera.get("name", "")).strip(): camera.get("local_save_videos") is not False
+        for camera in normalize_cameras(config)
+    }
+    deleted = 0
+    for record in db.get_uploaded_video_records():
+        camera_name = record.get("camera", "")
+        if keep_local_by_camera.get(camera_name, True):
+            continue
+        for file_name in {record.get("message", ""), record.get("teldrive_video_name", "")}:
+            safe_name = Path(file_name).name
+            if not safe_name:
+                continue
+            path = CLIPS_DIR / safe_name
+            if not path.exists() or not path.is_file():
+                continue
+            try:
+                path.unlink()
+                deleted += 1
+                logger.info("[RECORD] removed uploaded local clip file=%s", safe_name)
+            except OSError as exc:
+                logger.warning("[RECORD] could not remove uploaded local clip file=%s error=%s", safe_name, exc)
+    return deleted
 
 
 def safe_camera_name(camera_name: str) -> str:

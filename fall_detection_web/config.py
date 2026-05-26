@@ -202,6 +202,24 @@ def _coerce(key: str, value: Any) -> Any:
     return value
 
 
+def _bool_default_true(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"0", "false", "no", "off"}:
+        return False
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    return True
+
+
+def _bool_default_false(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    return text in {"1", "true", "yes", "on"}
+
+
 def _serialize(key: str, value: Any) -> str:
     """Serialize a config value to string for DB storage."""
     if key in ["cameras", "prompts"]:
@@ -261,17 +279,17 @@ def normalize_cameras(config: dict[str, Any]) -> list[dict[str, Any]]:
         if not isinstance(cam, dict):
             continue
         cameras.append({
-            "enabled": cam.get("enabled") is not False,
+            "enabled": _bool_default_true(cam.get("enabled")),
             "name": str(cam.get("name", "")).strip() or f"Camera {i + 1}",
             "rtsp_url": str(cam.get("rtsp_url", "")).strip(),
             "go2rtc_src": str(cam.get("go2rtc_src", "")).strip(),
             "live_url": str(cam.get("live_url", "")).strip(),
             "live_mode": str(cam.get("live_mode", "auto")).strip() if str(cam.get("live_mode", "auto")).strip() in {"auto", "iframe", "snapshot"} else "auto",
             "prompt_id": str(cam.get("prompt_id", "")).strip(),
-            "local_save_images": cam.get("local_save_images") is not False,
-            "local_save_videos": cam.get("local_save_videos") is not False,
-            "teldrive_upload_images": cam.get("teldrive_upload_images") is not False,
-            "teldrive_record_enabled": cam.get("teldrive_record_enabled") is True,
+            "local_save_images": _bool_default_true(cam.get("local_save_images")),
+            "local_save_videos": _bool_default_true(cam.get("local_save_videos")),
+            "teldrive_upload_images": _bool_default_true(cam.get("teldrive_upload_images")),
+            "teldrive_record_enabled": _bool_default_false(cam.get("teldrive_record_enabled")),
             "record_seconds": positive_int(cam.get("record_seconds", config.get("teldrive_record_seconds", 10)), "record_seconds"),
             "record_cooldown": positive_int(cam.get("record_cooldown", config.get("teldrive_record_cooldown", 300)), "record_cooldown"),
         })

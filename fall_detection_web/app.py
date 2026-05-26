@@ -38,6 +38,7 @@ async def lifespan(app: FastAPI):
     db.delete_old_events(7)        # clean up old events/images at startup
     config.migrate_config_json()   # one-time: config.json → DB
     current_config = config.read_config()
+    monitor.cleanup_uploaded_local_clips(current_config)
     
     # Init auth secret from config or env
     jwt_secret = current_config.get("jwt_secret")
@@ -275,6 +276,7 @@ def get_config(_: str = Depends(auth.require_auth)):
 def save_config(new_config: dict[str, Any] = Body(...), _: str = Depends(auth.require_auth)):
     try:
         updated = config.write_config(new_config)
+        monitor.cleanup_uploaded_local_clips(updated)
         state = monitor.read_state()
         if state.get("running"):
             monitor.restart_monitor(updated)
@@ -335,6 +337,7 @@ def save_cameras(payload: dict[str, Any] = Body(...), _: str = Depends(auth.requ
         current = config.read_config()
         current["cameras"] = payload.get("cameras", [])
         updated = config.write_config(current)
+        monitor.cleanup_uploaded_local_clips(updated)
         state = monitor.read_state()
         if state.get("running"):
             monitor.restart_monitor(updated)

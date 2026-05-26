@@ -364,6 +364,22 @@ def get_recordings_total(camera: str | None = None, date_from: str | None = None
         return conn.execute(query, params).fetchone()[0]
 
 
+def get_uploaded_video_records() -> list[dict[str, str]]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT camera, message, teldrive_video_name FROM events "
+            "WHERE teldrive_video_id IS NOT NULL AND teldrive_video_id != ''"
+        ).fetchall()
+    return [
+        {
+            "camera": str(row["camera"] or ""),
+            "message": str(row["message"] or ""),
+            "teldrive_video_name": str(row["teldrive_video_name"] or ""),
+        }
+        for row in rows
+    ]
+
+
 def get_events_total(ai_result: str | None = None, camera: str | None = None) -> int:
     query = "SELECT COUNT(*) FROM events"
     params = []
