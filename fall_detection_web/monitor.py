@@ -35,6 +35,22 @@ monitor_lock = threading.Lock()
 cleanup_lock = threading.Lock()
 cleanup_thread: threading.Thread | None = None
 
+# Fault tolerance state variables for API outages
+ai_suspended_until_ts = 0.0
+upload_suspended_until_ts = 0.0
+consecutive_ai_failures = 0
+consecutive_upload_failures = 0
+
+def get_backoff_seconds(failures: int) -> int:
+    if failures <= 3:
+        return 60
+    elif failures == 4:
+        return 300
+    elif failures == 5:
+        return 900
+    else:
+        return 3600
+
 
 status: dict[str, Any] = {
     "running": False,
@@ -47,6 +63,8 @@ status: dict[str, Any] = {
     "last_alert_at": "",
     "frames": 0,
     "mode": "",
+    "ai_suspended": False,
+    "upload_suspended": False,
 }
 
 
@@ -155,6 +173,7 @@ def upload_event_video_safe(
     event_time: str = "",
     event_time_local: str = "",
 ) -> bool:
+    global consecutive_upload_failures, upload_suspended_until_ts
     try:
         file_data = teldrive.upload_event_video(config, video_path, camera_name)
         video_id = str(file_data.get("id", ""))
@@ -175,10 +194,47 @@ def upload_event_video_safe(
             event_time_local=event_time_local,
         )
         upload_recording_thumbnail_if_needed(config, camera_config, camera_name, int(event["id"]), str(event.get("image_file", "")))
+        
+        # Success! Reset consecutive failures and notify if recovering
+        if consecutive_upload_failures >= 3:
+            try:
+                photo_path = thumbnail_path if (thumbnail_path and thumbnail_path.exists()) else SNAPSHOT_PATH
+                if photo_path and photo_path.exists():
+                    send_telegram(
+                        photo_path,
+                        f"✅ Thông báo: Dịch vụ tải video lên đám mây (Teldrive) đã khôi phục hoạt động bình thường trên camera {camera_name}.",
+                        config
+                    )
+            except Exception as tg_exc:
+                logger.warning("[MONITOR] Failed to send Teldrive recovery alert: %s", tg_exc)
+        
+        consecutive_upload_failures = 0
+        set_state(upload_suspended=False)
         return True
     except Exception as exc:
         logger.warning("[TELDRIVE] video upload failed camera=%s: %s", camera_name, exc)
         insert_event("teldrive_video_error", camera=camera_name, error=str(exc))
+        
+        consecutive_upload_failures += 1
+        
+        if consecutive_upload_failures >= 3:
+            now = time.time()
+            backoff = get_backoff_seconds(consecutive_upload_failures)
+            upload_suspended_until_ts = now + backoff
+            suspended_time_str = datetime.fromtimestamp(upload_suspended_until_ts, db.LOCAL_TZ).strftime("%H:%M:%S")
+            set_state(upload_suspended=True)
+            
+            try:
+                photo_path = thumbnail_path if (thumbnail_path and thumbnail_path.exists()) else SNAPSHOT_PATH
+                if photo_path and photo_path.exists():
+                    send_telegram(
+                        photo_path,
+                        f"⚠️ Cảnh báo: Dịch vụ tải video lên đám mây (Teldrive) liên tiếp gặp lỗi ({consecutive_upload_failures} lần). "
+                        f"Hệ thống tạm ngưng ghi hình và tải lên đến {suspended_time_str} để tránh quá tải.\nLỗi: {exc}",
+                        config
+                    )
+            except Exception as tg_exc:
+                logger.warning("[MONITOR] Failed to send Teldrive suspension alert: %s", tg_exc)
         return False
 
 
@@ -778,6 +834,7 @@ def has_enabled_rtsp_camera(config: dict[str, Any]) -> bool:
 
 
 def _monitor_loop(config: dict[str, Any]) -> None:
+    global consecutive_ai_failures, ai_suspended_until_ts
     cameras = _enabled_monitor_cameras(config)
     if not cameras:
         message = "No enabled cameras with RTSP URLs or go2rtc sources"
@@ -866,8 +923,13 @@ def _monitor_loop(config: dict[str, Any]) -> None:
 
                 if person_detected:
                     set_state(last_person_confidence=best_confidence, last_error="", last_camera=camera_name)
-                    logger.info("[PERSON] camera=%s confidence=%.2f", camera_name, best_confidence)
-                    if (
+                                       # Check if Teldrive uploads are suspended
+                    if now < upload_suspended_until_ts:
+                        import random
+                        if random.random() < 0.1:
+                            logger.info("[MONITOR] Teldrive uploads are temporarily suspended (retry after %s)", 
+                                        datetime.fromtimestamp(upload_suspended_until_ts, db.LOCAL_TZ).strftime("%H:%M:%S"))
+                    elif (
                         teldrive.enabled(config)
                         and camera.get("teldrive_record_enabled")
                         and now - last_record[index] > float(camera.get("record_cooldown", config.get("teldrive_record_cooldown", 300)))
@@ -884,28 +946,72 @@ def _monitor_loop(config: dict[str, Any]) -> None:
                         verify_path = camera_snapshot_path(index)
                         cv2.imwrite(str(verify_path), frame)
                         cv2.imwrite(str(SNAPSHOT_PATH), frame)
-                        try:
-                            ai_result, ai_description, raw = verify_scene(verify_path, config, camera)
-                            last_verify[index] = now
-                            set_state(last_ai_result=ai_result, last_verify_at=now_iso(), last_error="")
-                            log_event(
-                                config,
-                                "verified",
-                                image_path=verify_path,
-                                camera_config=camera,
-                                camera=camera_name,
-                                confidence=best_confidence,
-                                ai_result=ai_result,
-                                ai_raw=ai_description,
-                                ai_response=raw,
-                                message=ai_description,
-                            )
-                        except Exception as exc:
-                            last_verify[index] = now
-                            set_state(last_error=str(exc), last_verify_at=now_iso())
-                            log_event(config, "ai_error", image_path=verify_path, camera_config=camera, camera=camera_name, confidence=best_confidence, error=str(exc))
+                        
+                        # Check if AI calls are suspended
+                        if now < ai_suspended_until_ts:
+                            import random
+                            if random.random() < 0.1:
+                                logger.info("[MONITOR] AI calls are temporarily suspended (retry after %s)", 
+                                            datetime.fromtimestamp(ai_suspended_until_ts, db.LOCAL_TZ).strftime("%H:%M:%S"))
                             ai_result = "SAFE"
-
+                        else:
+                            try:
+                                ai_result, ai_description, raw = verify_scene(verify_path, config, camera)
+                                last_verify[index] = now
+                                set_state(last_ai_result=ai_result, last_verify_at=now_iso(), last_error="")
+                                
+                                # AI Call Success! Reset consecutive failures and notify if recovering
+                                if consecutive_ai_failures >= 3:
+                                    try:
+                                        send_telegram(
+                                            verify_path,
+                                            f"✅ Thông báo: Dịch vụ AI Cloud đã khôi phục hoạt động bình thường trên camera {camera_name}.",
+                                            config
+                                        )
+                                    except Exception as tg_exc:
+                                        logger.warning("[MONITOR] Failed to send AI recovery alert: %s", tg_exc)
+                                consecutive_ai_failures = 0
+                                set_state(ai_suspended=False)
+                                
+                                log_event(
+                                    config,
+                                    "verified",
+                                    image_path=verify_path,
+                                    camera_config=camera,
+                                    camera=camera_name,
+                                    confidence=best_confidence,
+                                    ai_result=ai_result,
+                                    ai_raw=ai_description,
+                                    ai_response=raw,
+                                    message=ai_description,
+                                )
+                            except Exception as exc:
+                                last_verify[index] = now
+                                set_state(last_error=str(exc), last_verify_at=now_iso())
+                                
+                                # AI Call Failed! Increment failures and alert if suspended
+                                consecutive_ai_failures += 1
+                                logger.warning("[MONITOR] AI calls failed (%d consecutive failures): %s", consecutive_ai_failures, exc)
+                                
+                                if consecutive_ai_failures >= 3:
+                                    backoff = get_backoff_seconds(consecutive_ai_failures)
+                                    ai_suspended_until_ts = now + backoff
+                                    suspended_time_str = datetime.fromtimestamp(ai_suspended_until_ts, db.LOCAL_TZ).strftime("%H:%M:%S")
+                                    set_state(ai_suspended=True)
+                                    
+                                    try:
+                                        send_telegram(
+                                            verify_path,
+                                            f"⚠️ Cảnh báo: Dịch vụ AI Cloud liên tiếp lỗi ({consecutive_ai_failures} lần). "
+                                            f"Hệ thống tạm ngưng gọi AI đến {suspended_time_str} để tránh quá tải.\nLỗi: {exc}",
+                                            config
+                                        )
+                                    except Exception as tg_exc:
+                                        logger.warning("[MONITOR] Failed to send AI suspension alert: %s", tg_exc)
+                                
+                                log_event(config, "ai_error", image_path=verify_path, camera_config=camera, camera=camera_name, confidence=best_confidence, error=str(exc))
+                                ai_result = "SAFE"
+ 
                         if ai_result == "EMERGENCY":
                             if now - last_alert[index] > float(config["alert_cooldown"]):
                                 try:
