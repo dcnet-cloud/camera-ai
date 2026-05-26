@@ -185,20 +185,31 @@ def event_image(request: Request, filename: str, _: str = Depends(auth.require_a
     )
 
 
-@app.get("/api/teldrive/file/{file_id}/{file_name}")
+@app.get("/api/teldrive/file/{file_id}/{file_name:path}")
 def teldrive_file(request: Request, file_id: str, file_name: str, _: str = Depends(auth.require_auth)):
     try:
         c = config.read_config()
-        response = teldrive.download_file(c, file_id, file_name, request.headers.get("range", ""))
-        media_type = response.headers.get("content-type", "application/octet-stream")
+        range_header = request.headers.get("range", "")
+        response = teldrive.download_file(c, file_id, file_name, range_header)
+        upstream_media_type = response.headers.get("content-type", "application/octet-stream")
         guessed_media_type = teldrive._mime_type(file_name)
-        if media_type == "application/octet-stream":
+        media_type = upstream_media_type
+        if media_type == "application/octet-stream" or (
+            guessed_media_type.startswith("video/") and not media_type.startswith("video/")
+        ):
             media_type = guessed_media_type
         headers = {"Cache-Control": "private, max-age=300"}
-        for name in ("accept-ranges", "content-length", "content-range", "etag", "last-modified"):
+        passthrough_headers = {
+            "accept-ranges": "Accept-Ranges",
+            "content-length": "Content-Length",
+            "content-range": "Content-Range",
+            "etag": "ETag",
+            "last-modified": "Last-Modified",
+        }
+        for name, header_name in passthrough_headers.items():
             value = response.headers.get(name)
             if value:
-                headers[name.title()] = value
+                headers[header_name] = value
         if media_type.startswith("video/"):
             headers["Content-Disposition"] = f'inline; filename="{file_name}"'
             headers["Accept-Ranges"] = response.headers.get("accept-ranges", "bytes")

@@ -920,10 +920,9 @@
             </div>
           `;
         } else {
-          // Render video tag directly inline!
           mediaHtml = `
             <div class="recording-thumb-wrapper" style="cursor: default;">
-              <video controls preload="metadata" src="${esc(item.video_url || "")}" style="width: 100%; height: 100%; object-fit: contain; background: #000; display: block;"></video>
+              <video class="lazy-recording-video" controls preload="none" data-src="${esc(item.video_url || "")}" style="width: 100%; height: 100%; object-fit: contain; background: #000; display: block;"></video>
             </div>
           `;
         }
@@ -987,7 +986,8 @@
 
         try {
           // Send a pre-warm probe request to the backend with Range header.
-          await fetch(url, { headers: { "Range": "bytes=0-1023" } });
+          const probe = await fetch(url, { headers: { "Range": "bytes=0-1023" } });
+          await probe.arrayBuffer();
         } catch (err) {
           console.warn("Pre-warm probe failed:", err);
         }
@@ -1002,7 +1002,11 @@
         video.src = url;
         video.controls = true;
         video.autoplay = true;
+        video.preload = "metadata";
         video.style.width = "100%";
+        video.addEventListener("error", () => {
+          showToast("Video không phát được trong trình duyệt. Có thể file cũ đang dùng HEVC/H.265.", "err");
+        }, { once: true });
         body.appendChild(video);
       } else {
         const img = document.createElement("img");
@@ -1179,6 +1183,12 @@
       const playBtn = event.target.closest(".play-recording");
       if (playBtn) {
         showViewer(playBtn.dataset.title, playBtn.dataset.url, "video");
+      }
+      const lazyVideo = event.target.closest(".lazy-recording-video");
+      if (lazyVideo && !lazyVideo.getAttribute("src")) {
+        lazyVideo.src = lazyVideo.dataset.src || "";
+        lazyVideo.load();
+        lazyVideo.play().catch(() => {});
       }
       const eventImg = event.target.closest(".view-event-image");
       if (eventImg) {

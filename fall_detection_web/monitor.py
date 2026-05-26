@@ -282,7 +282,9 @@ def record_go2rtc_clip(config: dict[str, Any], camera: dict[str, Any], output_pa
             "src": video_only_source(src),
             "duration": request_seconds,
             "filename": output_path.name,
-            "video": "h264,h265,hevc",
+            # Recordings are played by the browser <video> element, so keep
+            # Teldrive clips in H.264 MP4 instead of HEVC/H.265.
+            "video": "h264",
         },
         stream=True,
         timeout=request_seconds + 30,
@@ -342,8 +344,10 @@ def record_and_upload_clip(
             if writer is None:
                 height, width = frame.shape[:2]
                 candidates = (
-                    (CLIPS_DIR / f"{base_path.name}_raw.avi", "MJPG"),
+                    (CLIPS_DIR / f"{base_path.name}_raw.mp4", "avc1"),
+                    (CLIPS_DIR / f"{base_path.name}_raw.mp4", "H264"),
                     (CLIPS_DIR / f"{base_path.name}_raw.mp4", "mp4v"),
+                    (CLIPS_DIR / f"{base_path.name}_raw.avi", "MJPG"),
                 )
                 for candidate, codec in candidates:
                     candidate_writer = cv2.VideoWriter(
