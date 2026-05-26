@@ -32,6 +32,8 @@ state_lock = threading.Lock()
 stop_event = threading.Event()
 worker_thread: threading.Thread | None = None
 monitor_lock = threading.Lock()
+cleanup_lock = threading.Lock()
+cleanup_thread: threading.Thread | None = None
 
 
 status: dict[str, Any] = {
@@ -282,6 +284,26 @@ def cleanup_uploaded_local_clips(config: dict[str, Any]) -> int:
         except OSError as exc:
             logger.warning("[RECORD] could not remove uploaded local clip file=%s error=%s", path.name, exc)
     return deleted
+
+
+def schedule_uploaded_local_clips_cleanup(config: dict[str, Any], reason: str = "") -> str:
+    global cleanup_thread
+    with cleanup_lock:
+        if cleanup_thread and cleanup_thread.is_alive():
+            logger.info("[RECORD] local clip cleanup already running; skip schedule reason=%s", reason)
+            return "already running"
+
+        def run_cleanup() -> None:
+            try:
+                deleted = cleanup_uploaded_local_clips(config.copy())
+                logger.info("[RECORD] local clip cleanup finished reason=%s deleted=%s", reason, deleted)
+            except Exception as exc:
+                logger.warning("[RECORD] local clip cleanup failed reason=%s error=%s", reason, exc)
+
+        cleanup_thread = threading.Thread(target=run_cleanup, daemon=True, name="clip-cleanup")
+        cleanup_thread.start()
+        logger.info("[RECORD] scheduled local clip cleanup reason=%s", reason)
+        return "scheduled"
 
 
 def safe_camera_name(camera_name: str) -> str:
