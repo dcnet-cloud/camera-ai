@@ -298,6 +298,27 @@ def update_event_image(event_id: int, image_path: Path, status_name: str = "reco
     return image_file
 
 
+def find_matching_teldrive_image(conn: sqlite3.Connection, camera: str, event_time_str: str) -> tuple[str, str] | None:
+    if not camera or not event_time_str:
+        return None
+    try:
+        t_event = datetime.fromisoformat(event_time_str)
+    except Exception:
+        return None
+    t_min = (t_event - timedelta(seconds=120)).isoformat(timespec="seconds")
+    t_max = (t_event + timedelta(seconds=120)).isoformat(timespec="seconds")
+    row = conn.execute(
+        "SELECT teldrive_image_id, teldrive_image_name FROM events "
+        "WHERE camera = ? AND status = 'teldrive_video_uploaded' "
+        "AND teldrive_image_id IS NOT NULL AND teldrive_image_id != '' "
+        "AND time >= ? AND time <= ? LIMIT 1",
+        (camera, t_min, t_max)
+    ).fetchone()
+    if row:
+        return row[0], row[1]
+    return None
+
+
 def get_events(
     limit: int = 100, 
     offset: int = 0, 
@@ -327,16 +348,23 @@ def get_events(
 
     with get_conn() as conn:
         rows = conn.execute(query, params).fetchall()
-    events: list[dict[str, Any]] = []
-    for row in rows:
-        event = dict(row)
-        image_file = str(event.get("image_file") or "").strip()
-        if event.get("teldrive_image_id") and event.get("teldrive_image_name"):
-            name = quote(str(event["teldrive_image_name"]), safe="")
-            event["image_url"] = f"/api/teldrive/file/{event['teldrive_image_id']}/{name}"
-        elif image_file and (EVENT_IMAGES_DIR / image_file).exists():
-            event["image_url"] = f"/api/event-image/{image_file}"
-        events.append(event)
+        events: list[dict[str, Any]] = []
+        for row in rows:
+            event = dict(row)
+            image_file = str(event.get("image_file") or "").strip()
+            if event.get("teldrive_image_id") and event.get("teldrive_image_name"):
+                name = quote(str(event["teldrive_image_name"]), safe="")
+                event["image_url"] = f"/api/teldrive/file/{event['teldrive_image_id']}/{name}"
+            elif image_file and (EVENT_IMAGES_DIR / image_file).exists():
+                event["image_url"] = f"/api/event-image/{image_file}"
+                
+            if not event.get("image_url") and event.get("status") == "verified":
+                matching = find_matching_teldrive_image(conn, event.get("camera"), event.get("time"))
+                if matching:
+                    t_id, t_name = matching
+                    name = quote(str(t_name), safe="")
+                    event["image_url"] = f"/api/teldrive/file/{t_id}/{name}"
+            events.append(event)
     return events
 
 
