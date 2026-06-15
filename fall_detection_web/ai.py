@@ -146,7 +146,7 @@ def normalize_ai_result(content: str) -> str:
     return "SAFE"
 
 
-def short_text(value: str, limit: int = 20) -> str:
+def short_text(value: str, limit: int = 100) -> str:
     value = " ".join(str(value).split())
     return value[:limit]
 
