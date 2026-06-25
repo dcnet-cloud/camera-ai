@@ -106,10 +106,10 @@ Sau khi đăng nhập, hãy truy cập menu **Settings** (hoặc biểu tượng
 * **go2rtc URL**: Link API của go2rtc (ví dụ: `http://127.0.0.1:1984` hoặc URL public của bạn `https://go2rtc.example.me`).
 
 ### 4. Cấu hình Lưu Trữ Lịch Sử (Teldrive - Tùy chọn)
-Nếu bạn muốn lưu trữ video sự cố lên Telegram không giới hạn dung lượng qua Teldrive:
+Nếu bạn muốn lưu trữ video và hình ảnh sự cố lên Telegram không giới hạn dung lượng thông qua hệ thống tệp ảo Teldrive:
 * **Teldrive Enabled**: Tích chọn để kích hoạt.
 * **Teldrive Base URL**: Đường dẫn đến server Teldrive của bạn (ví dụ: `https://teldrive.yourdomain.com`).
-* **Teldrive Token**: Token JWT/Bearer để xác thực tài khoản Teldrive.
+* **Teldrive Token**: Nhập **Token JWT/Bearer** hoặc **Khóa API tĩnh vĩnh viễn (Static API Key)** của bạn. Hỗ trợ đầy đủ khóa API tĩnh vĩnh viễn từ phiên bản Teldrive tùy biến của [minhhungtsbd/teldrive](https://github.com/minhhungtsbd/teldrive) giúp kết nối luôn ổn định, không lo hết hạn phiên đăng nhập.
 * **Teldrive Root Path**: Đường dẫn thư mục gốc để lưu trữ (ví dụ: `/Fall Detection`).
 
 ### 5. Cấu hình Bộ Nhớ Đệm Redis (Tùy chọn - Giúp tối ưu hóa toàn diện & load mượt mà)
@@ -276,6 +276,146 @@ Truy cập menu **Cameras** > **Add Camera** hoặc chỉnh sửa camera hiện 
    # Xem log hoạt động theo thời gian thực
    journalctl -u fall-detection -f
    ```
+
+---
+
+## Hướng Dẫn Cài Đặt & Cấu Hình Teldrive (Lưu Trữ Video & Hình Ảnh Sự Cố)
+
+Để lưu trữ tự động các đoạn video bằng chứng và hình ảnh sự cố lên Telegram không giới hạn dung lượng, bạn nên cài đặt bản **Teldrive** đã được tùy biến riêng hỗ trợ **Khóa API tĩnh vĩnh viễn (Static API Key)** tại repo [minhhungtsbd/teldrive](https://github.com/minhhungtsbd/teldrive).
+
+### 1. Hướng dẫn cài đặt & biên dịch Teldrive trên VPS
+
+#### Cách 1: Biên dịch bằng Docker (Khuyên dùng vì sạch sẽ và nhanh chóng)
+Nếu VPS đã cài đặt Docker, bạn có thể biên dịch trực tiếp ra file thực thi chạy độc lập mà không cần cài đặt Go trên hệ điều hành VPS:
+```bash
+# 1. Di chuyển vào thư mục chứa và clone mã nguồn
+cd ~/
+git clone https://github.com/minhhungtsbd/teldrive.git teldrive-src
+cd teldrive-src
+
+# 2. Chạy container để sinh mã giao diện, sinh API và biên dịch server
+docker run --rm -v "$PWD":/app -w /app golang:alpine sh -c "
+  apk add --no-cache git curl bash unzip &&
+  go install github.com/go-task/task/v3/cmd/task@latest &&
+  /go/bin/task gen &&
+  /go/bin/task ui &&
+  CGO_ENABLED=0 go build -trimpath -ldflags '-s -w' -o bin/teldrive
+"
+```
+Sau khi chạy xong, tệp thực thi biên dịch hoàn tất sẽ nằm tại: `~/teldrive-src/bin/teldrive`.
+
+#### Cách 2: Biên dịch trực tiếp bằng Go (Yêu cầu Go >= 1.22 trên hệ thống)
+```bash
+cd ~/teldrive-src
+# Sinh các mã nguồn tự động
+go generate ./...
+# Biên dịch server
+go build -o bin/teldrive main.go
+```
+
+---
+
+### 2. Thiết lập Cơ sở dữ liệu & Cấu hình Teldrive
+
+1. **Chuẩn bị PostgreSQL Database**: Teldrive yêu cầu PostgreSQL để lưu trữ thông tin cấu trúc thư mục ảo. Chạy các lệnh SQL sau để khởi tạo:
+   ```sql
+   CREATE DATABASE teldrive_db;
+   CREATE USER teldrive_user WITH PASSWORD 'MatKhauCuaBan';
+   GRANT ALL PRIVILEGES ON DATABASE teldrive_db TO teldrive_user;
+   ```
+
+2. **Cấu hình tệp `config.toml`**:
+   Tạo thư mục `/etc/teldrive` và tạo file cấu hình:
+   ```bash
+   sudo mkdir -p /etc/teldrive
+   sudo nano /etc/teldrive/config.toml
+   ```
+   Dán nội dung cấu hình mẫu dưới đây (chú ý điền đúng thông tin kết nối Postgres và **thiết lập Khóa API tĩnh vĩnh viễn**):
+   ```toml
+   [server]
+   port = 8080
+   graceful-shutdown = '10s'
+
+   [db]
+   # Điền chuỗi kết nối database PostgreSQL của bạn
+   data-source = 'postgres://teldrive_user:MatKhauCuaBan@127.0.0.1:5432/teldrive_db?sslmode=disable'
+
+   [jwt]
+   secret = 'nhap-chuoi-secret-jwt-ngau-nhien-cua-ban'
+   session-time = '30d'
+   allowed-users = ["username_telegram_cua_ban"] # Whitelist username Telegram được phép truy cập
+   
+   # Cấu hình khóa API tĩnh bảo mật vĩnh viễn (Static API Key)
+   api-key = 'fall_detection_web_secure_api_key_2026' # Nhập khóa tự chọn bảo mật của bạn vào đây
+   api-key-user = 0 # ID Telegram sở hữu session (để 0 để hệ thống tự động nhận diện session đầu tiên)
+
+   [tg]
+   app-id = 2496 # Telegram App ID lấy từ my.telegram.org
+   app-hash = '8da85b0d5bfe62527e5b244c209159c3' # Telegram App Hash
+   auto-channel-create = true
+   channel-limit = 500000
+
+   [tg.session]
+   type = 'postgres'
+   key = 'session'
+   ```
+
+3. **Chạy dịch vụ Teldrive ngầm bằng Systemd**:
+   Tạo file dịch vụ:
+   ```bash
+   sudo nano /etc/systemd/system/teldrive.service
+   ```
+   Dán nội dung cấu hình sau:
+   ```ini
+   [Unit]
+   Description=Teldrive Telegram VFS Service
+   After=network.target
+
+   [Service]
+   ExecStart=/usr/bin/teldrive run --config /etc/teldrive/config.toml
+   Restart=always
+   RestartSec=5
+   WorkingDirectory=/etc/teldrive
+
+   [Install]
+   WantedBy=multi-user.target
+   ```
+   Sau đó di chuyển file thực thi và kích hoạt dịch vụ:
+   ```bash
+   sudo cp ~/teldrive-src/bin/teldrive /usr/bin/teldrive
+   sudo chmod +x /usr/bin/teldrive
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now teldrive
+   sudo systemctl status teldrive
+   ```
+
+---
+
+### 3. Cách sử dụng Khóa API Tĩnh (Static API Key) để tải lên video & hình ảnh
+
+Trong bản phân phối đã được tùy biến này, bạn có thể thực hiện xác thực bảo mật thông qua Khóa API tĩnh vĩnh viễn cực kỳ linh hoạt bằng 3 cách:
+1. **Authorization Header:** Gửi kèm header `Authorization: Bearer <khoa-api-tinh>` (Cách này được sử dụng tự động bởi Fall Detection Web khi bạn điền khóa vào ô **Teldrive token**).
+2. **X-API-Key Header:** Gửi kèm header `X-API-Key: <khoa-api-tinh>`.
+3. **URL Parameter:** Chèn thêm tham số vào cuối URL `?token=<khoa-api-tinh>`.
+
+#### 🔗 Nhúng trực tiếp hình ảnh/video vào giao diện (Bypass)
+Khi bạn cần nhúng các hình ảnh snapshot hoặc stream trực tiếp video từ Teldrive lên trang web khác, bạn chỉ cần chèn thêm tham số `?token=` vào đường dẫn tệp:
+```html
+<!-- Nhúng ảnh thumbnail sự cố -->
+<img src="http://<VPS-IP>:8080/api/files/<FILE_ID>/thumb.jpg?token=fall_detection_web_secure_api_key_2026" />
+
+<!-- Phát trực tiếp video sự cố -->
+<video controls>
+  <source src="http://<VPS-IP>:8080/api/files/<FILE_ID>/clip.mp4?token=fall_detection_web_secure_api_key_2026" type="video/mp4">
+</video>
+```
+
+#### 🔑 Đăng nhập nhanh vào trang quản trị Web UI Teldrive
+Để truy cập nhanh vào giao diện quản lý tệp tin Web UI của Teldrive trên trình duyệt mà không cần phải xác thực đăng nhập mã OTP qua Telegram, hãy truy cập đường dẫn:
+```text
+http://<VPS-IP>:8080/api/auth/static?key=fall_detection_web_secure_api_key_2026
+```
+Hệ thống sẽ tự động xác nhận Khóa API, thiết lập cookie phiên làm việc và chuyển hướng bạn thẳng vào trang quản lý tệp tin.
 
 ---
 
