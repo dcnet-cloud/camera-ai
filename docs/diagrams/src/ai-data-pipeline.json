@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "Luồng dữ liệu AI — từ khung hình đến verdict",
+    "subtitle": "Mã hoá ảnh, gọi Vision API, parse phản hồi và phân nhánh đầu ra",
+    "output": "ai-data-pipeline.html",
+    "viewBox": [1120, 700]
+  },
+  "stages": [
+    { "label": "Khung hình" },
+    { "label": "Chuẩn bị" },
+    { "label": "Vision API" },
+    { "label": "Parse" },
+    { "label": "Đầu ra" }
+  ],
+  "nodes": [
+    { "id": "snap", "type": "database", "label": "Snapshot", "sublabel": "latest.jpg", "stage": 0, "row": 1, "tag": "JPEG" },
+    { "id": "cfg", "type": "security", "label": "Config", "sublabel": "prompts[] / prompt_id", "stage": 0, "row": 3, "tag": "per-camera" },
+    { "id": "dataurl", "type": "backend", "label": "Data URL", "sublabel": "base64", "stage": 1, "row": 0, "tag": "image_to_data_url" },
+    { "id": "prompt", "type": "security", "label": "Prompt", "sublabel": "verify_prompt", "stage": 1, "row": 2, "tag": "text" },
+    { "id": "vision", "type": "cloud", "label": "chat/completions", "sublabel": "vision_model", "stage": 2, "row": 1, "tag": "max_tokens=1000" },
+    { "id": "fallback", "type": "cloud", "label": "Fallback", "sublabel": "fallback_vision_model", "stage": 2, "row": 3, "tag": "khi lỗi" },
+    { "id": "raw", "type": "messagebus", "label": "Raw response", "sublabel": "SSE / JSON / concat", "stage": 3, "row": 0, "tag": "content" },
+    { "id": "strip", "type": "backend", "label": "strip thinking", "sublabel": "bỏ <think>", "stage": 3, "row": 1, "tag": "regex" },
+    { "id": "verdict", "type": "backend", "label": "parse verdict", "sublabel": "result · desc · raw", "stage": 3, "row": 2, "tag": "≤100 ký tự" },
+    { "id": "result", "type": "security", "label": "AI result", "sublabel": "SAFE / EMERGENCY", "stage": 4, "row": 0 },
+    { "id": "alert", "type": "cloud", "label": "Telegram", "sublabel": "sendPhoto", "stage": 4, "row": 1, "tag": "alert_cooldown" },
+    { "id": "event", "type": "database", "label": "log_event", "sublabel": "events / recordings", "stage": 4, "row": 2 }
+  ],
+  "flows": [
+    { "from": "snap", "to": "dataurl", "label": "đọc bytes", "classification": "ảnh", "variant": "emphasis", "fromSide": "right", "toSide": "left", "via": [[207, 271], [207, 157]], "labelAt": [214, 208] },
+    { "from": "cfg", "to": "prompt", "label": "chọn prompt", "classification": "config", "variant": "security", "fromSide": "right", "toSide": "left", "via": [[207, 499], [207, 385]], "labelAt": [214, 456] },
+    { "from": "dataurl", "to": "vision", "label": "image_url", "classification": "data URL", "variant": "emphasis", "fromSide": "right", "toSide": "left", "via": [[422, 157], [422, 271]], "labelAt": [430, 208] },
+    { "from": "prompt", "to": "vision", "label": "text", "classification": "prompt", "variant": "default", "fromSide": "right", "toSide": "left", "via": [[422, 385], [422, 271]], "labelAt": [430, 336] },
+    { "from": "vision", "to": "fallback", "label": "lỗi → retry", "classification": "RuntimeError", "variant": "security", "fromSide": "bottom", "toSide": "top", "route": "straight", "labelAt": [548, 442] },
+    { "from": "vision", "to": "raw", "label": "content", "classification": "200", "variant": "emphasis", "fromSide": "right", "toSide": "left", "via": [[637, 271], [637, 157]], "labelAt": [645, 208] },
+    { "from": "fallback", "to": "raw", "label": "content", "classification": "200", "variant": "dashed", "fromSide": "right", "toSide": "bottom", "via": [[690, 499], [690, 130], [745, 130]], "labelAt": [700, 330] },
+    { "from": "raw", "to": "strip", "label": "text", "classification": "chuỗi thô", "variant": "default", "fromSide": "bottom", "toSide": "top", "route": "straight", "labelAt": [763, 214] },
+    { "from": "strip", "to": "verdict", "label": "cleaned", "classification": "đã lọc", "variant": "default", "fromSide": "bottom", "toSide": "top", "route": "straight", "labelAt": [763, 328] },
+    { "from": "verdict", "to": "result", "label": "result", "classification": "verdict", "variant": "emphasis", "fromSide": "right", "toSide": "left", "via": [[852, 385], [852, 157]], "labelAt": [860, 250] },
+    { "from": "verdict", "to": "event", "label": "desc + raw", "classification": "ghi log", "variant": "default", "fromSide": "right", "toSide": "left", "route": "straight", "labelAt": [862, 372] },
+    { "from": "result", "to": "alert", "label": "EMERGENCY", "classification": "cảnh báo", "variant": "security", "fromSide": "bottom", "toSide": "top", "route": "straight", "labelAt": [978, 214] }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Chuẩn bị đầu vào", "items": ["Snapshot YOLO ghi ra latest.jpg / ảnh theo camera", "Ảnh → base64 data URL (image_to_data_url)", "Prompt chọn theo prompt_id của camera, fallback verify_prompt"] },
+    { "dot": "rose", "title": "Gọi model & fallback", "items": ["Payload: text prompt + image_url, gửi tới vision_model", "Lỗi model chính → tự retry fallback_vision_model", "Cả hai nhánh đều trả về cùng dạng content để parse"] },
+    { "dot": "emerald", "title": "Parse & phân nhánh", "items": ["response_ai_content đọc được SSE / JSON nối / JSON thường", "strip_thinking_content bỏ phần suy nghĩ của model", "verdict → (result, desc, raw): EMERGENCY mới gửi Telegram, mọi case đều log_event"] }
+  ]
+}

@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "Luồng AI — verify_scene (primary + fallback)",
+    "subtitle": "Gọi Vision API, tự fallback khi lỗi, parse verdict rồi cảnh báo & ghi log",
+    "output": "ai-verification-sequence.html",
+    "viewBox": [920, 720]
+  },
+  "participants": [
+    { "id": "monitor", "type": "backend", "label": "Monitor Loop", "sublabel": "_monitor_loop" },
+    { "id": "verify", "type": "backend", "label": "verify_scene", "sublabel": "ai.py" },
+    { "id": "primary", "type": "cloud", "label": "Vision Model", "sublabel": "vision_model" },
+    { "id": "fallback", "type": "cloud", "label": "Fallback", "sublabel": "fallback_vision_model" },
+    { "id": "parser", "type": "backend", "label": "Parser", "sublabel": "verdict + thinking" },
+    { "id": "telegram", "type": "cloud", "label": "Telegram", "sublabel": "sendPhoto" },
+    { "id": "db", "type": "database", "label": "SQLite", "sublabel": "log_event" }
+  ],
+  "segments": [
+    { "from": 150, "to": 250, "label": "Gọi model chính" },
+    { "from": 262, "to": 352, "label": "Fallback khi lỗi" },
+    { "from": 364, "to": 452, "label": "Parse verdict" },
+    { "from": 464, "to": 600, "label": "Cảnh báo & log" }
+  ],
+  "messages": [
+    { "from": "monitor", "to": "verify", "y": 172, "label": "verify_scene(img, camera)", "variant": "emphasis" },
+    { "from": "verify", "to": "primary", "y": 210, "label": "POST /chat/completions (text + image_url)", "variant": "default" },
+    { "from": "primary", "to": "verify", "y": 244, "label": "5xx / timeout", "variant": "security" },
+    { "from": "verify", "to": "fallback", "y": 284, "label": "retry: fallback model", "variant": "emphasis" },
+    { "from": "fallback", "to": "verify", "y": 322, "label": "200: content", "variant": "return" },
+    { "from": "verify", "to": "parser", "y": 374, "label": "response_ai_content()", "variant": "default" },
+    { "from": "parser", "to": "verify", "y": 426, "label": "(result, description, raw)", "variant": "return" },
+    { "from": "verify", "to": "monitor", "y": 470, "label": "EMERGENCY + mô tả", "variant": "return" },
+    { "from": "monitor", "to": "telegram", "y": 512, "label": "sendPhoto (nếu quá alert_cooldown)", "variant": "emphasis" },
+    { "from": "telegram", "to": "monitor", "y": 548, "label": "ok", "variant": "return" },
+    { "from": "monitor", "to": "db", "y": 588, "label": "log_event(verified / telegram_sent)", "variant": "dashed" }
+  ],
+  "activations": [
+    { "participant": "monitor", "from": 168, "to": 596, "type": "backend" },
+    { "participant": "verify", "from": 172, "to": 472, "type": "backend" },
+    { "participant": "primary", "from": 210, "to": 248, "type": "cloud" },
+    { "participant": "fallback", "from": 284, "to": 326, "type": "cloud" },
+    { "participant": "parser", "from": 374, "to": 430, "type": "backend" },
+    { "participant": "telegram", "from": 512, "to": 550, "type": "cloud" },
+    { "participant": "db", "from": 584, "to": 596, "type": "database" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Chọn prompt & model", "items": ["prompt lấy theo camera.prompt_id, nếu không có dùng verify_prompt chung", "Ảnh mã hoá base64 data URL đính kèm image_url", "max_tokens=1000, stream=false, timeout=120s"] },
+    { "dot": "rose", "title": "Fallback tự động", "items": ["Lỗi RuntimeError (HTTP/timeout) ở model chính → thử fallback_vision_model", "Chỉ fallback khi có cấu hình và khác model chính", "3 lần lỗi liên tiếp → tạm ngưng gọi AI (backoff) + cảnh báo Telegram"] },
+    { "dot": "emerald", "title": "Parse verdict bền bỉ", "items": ["Đọc được SSE, JSON nối, hoặc JSON thường", "strip_thinking_content() bỏ <think>…</think>", "Dòng 1 = SAFE/EMERGENCY, dòng 2 = mô tả ngắn (≤100 ký tự)"] }
+  ]
+}

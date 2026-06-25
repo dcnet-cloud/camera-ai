@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Kiến trúc hệ thống — Fall Detection Web",
+    "subtitle": "Camera → go2rtc → YOLO + AI Vision → cảnh báo & lưu trữ",
+    "output": "system-architecture.html",
+    "viewBox": [1200, 660]
+  },
+  "components": [
+    { "id": "cam", "type": "external", "label": "IP Camera", "sublabel": "RTSP H.264/H.265", "pos": [40, 300], "size": [120, 64] },
+    { "id": "go2rtc", "type": "cloud", "label": "go2rtc", "sublabel": "frame.jpeg :1984", "pos": [210, 300], "size": [120, 60] },
+    { "id": "webui", "type": "frontend", "label": "Web UI", "sublabel": "Dashboard / Live", "pos": [380, 150], "size": [150, 60], "tag": "JWT cookie" },
+    { "id": "monitor", "type": "backend", "label": "Monitor Loop", "sublabel": "_monitor_loop", "pos": [380, 290], "size": [150, 64], "tag": "threading.Lock" },
+    { "id": "capture", "type": "backend", "label": "Capture Thread", "sublabel": "1/camera, buffer=1", "pos": [380, 440], "size": [150, 60] },
+    { "id": "yolo", "type": "backend", "label": "YOLOv8", "sublabel": "person, CPU", "pos": [580, 290], "size": [150, 64], "tag": "classes=[0]" },
+    { "id": "redis", "type": "database", "label": "Redis", "sublabel": "fail-open (option)", "pos": [580, 440], "size": [150, 60] },
+    { "id": "aiclient", "type": "backend", "label": "AI Client", "sublabel": "verify_scene()", "pos": [780, 290], "size": [150, 64] },
+    { "id": "sqlite", "type": "database", "label": "SQLite WAL", "sublabel": "events / recordings", "pos": [780, 440], "size": [150, 60] },
+    { "id": "ai", "type": "cloud", "label": "AI Vision API", "sublabel": "OpenAI-compatible", "pos": [990, 200], "size": [160, 66], "tag": "primary + fallback" },
+    { "id": "telegram", "type": "cloud", "label": "Telegram", "sublabel": "sendPhoto", "pos": [990, 330], "size": [160, 60] },
+    { "id": "teldrive", "type": "cloud", "label": "Teldrive", "sublabel": "Telegram VFS", "pos": [990, 450], "size": [160, 60], "tag": "Static API Key" }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "Camera LAN", "wraps": ["cam"] },
+    { "kind": "region", "label": "VPS · fall_detection_web (FastAPI + uvicorn)", "wraps": ["go2rtc", "webui", "monitor", "capture", "yolo", "redis", "aiclient", "sqlite"] },
+    { "kind": "region", "label": "Cloud · dịch vụ ngoài", "wraps": ["ai", "telegram", "teldrive"] }
+  ],
+  "connections": [
+    { "from": "cam", "to": "go2rtc", "label": "RTSP", "variant": "default" },
+    { "from": "go2rtc", "to": "capture", "label": "frame.jpeg", "variant": "emphasis", "fromSide": "bottom", "toSide": "left", "labelAt": [250, 408] },
+    { "from": "cam", "to": "capture", "label": "RTSP fallback", "variant": "dashed", "fromSide": "bottom", "toSide": "left", "labelAt": [180, 522] },
+    { "from": "capture", "to": "monitor", "label": "frame holder + seq", "variant": "default", "fromSide": "top", "toSide": "bottom", "labelAt": [455, 398] },
+    { "from": "monitor", "to": "yolo", "label": "predict()", "variant": "emphasis", "labelAt": [555, 282] },
+    { "from": "yolo", "to": "aiclient", "label": "person → verify", "variant": "emphasis", "labelAt": [755, 282] },
+    { "from": "aiclient", "to": "ai", "label": "chat/completions", "variant": "emphasis", "fromSide": "right", "toSide": "left", "labelAt": [960, 285] },
+    { "from": "monitor", "to": "telegram", "label": "sendPhoto (EMERGENCY)", "variant": "security", "fromSide": "right", "toSide": "left", "labelAt": [755, 405] },
+    { "from": "monitor", "to": "sqlite", "label": "log_event", "variant": "default", "fromSide": "bottom", "toSide": "left", "labelAt": [628, 405] },
+    { "from": "monitor", "to": "teldrive", "label": "record + upload clip", "variant": "dashed", "fromSide": "bottom", "toSide": "left", "labelAt": [760, 532] },
+    { "from": "webui", "to": "sqlite", "label": "API query", "variant": "default", "fromSide": "right", "toSide": "top", "labelAt": [620, 250] },
+    { "from": "webui", "to": "redis", "label": "cache read", "variant": "dashed", "fromSide": "bottom", "toSide": "top", "labelAt": [555, 362] }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Thu nhận khung hình", "items": ["Mỗi camera có 1 Capture Thread riêng (buffer=1)", "Ưu tiên go2rtc frame.jpeg, fallback RTSP IP camera", "Frame mới đẩy vào holder kèm seq để Monitor đọc"] },
+    { "dot": "emerald", "title": "Suy luận & xác minh", "items": ["YOLOv8 phát hiện person (class 0) trên CPU", "AI Client gọi Vision API khi có người + đủ verify_interval", "Verdict SAFE / EMERGENCY điều khiển cảnh báo"] },
+    { "dot": "rose", "title": "Cảnh báo & lưu trữ", "items": ["EMERGENCY → Telegram sendPhoto (có alert_cooldown)", "log_event ghi vào SQLite (events/recordings)", "Teldrive lưu clip + thumbnail lên Telegram VFS", "Redis là cache fail-open, hỏng vẫn không vỡ request"] }
+  ]
+}

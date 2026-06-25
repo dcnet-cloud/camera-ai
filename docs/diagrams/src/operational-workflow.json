@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Luồng hoạt động chi tiết — Monitor Loop",
+    "subtitle": "Từ khung hình camera đến cảnh báo, ghi hình và dòng thời gian sự kiện",
+    "output": "operational-workflow.html",
+    "viewBox": [720, 840]
+  },
+  "lanes": [
+    { "id": "stream", "label": "Camera & Stream" },
+    { "id": "detect", "label": "Capture & YOLO" },
+    { "id": "ai", "label": "AI Verification" },
+    { "id": "alert", "label": "Cảnh báo & Ghi hình" },
+    { "id": "store", "label": "Lưu trữ & Timeline" }
+  ],
+  "nodes": [
+    { "id": "cam", "lane": "stream", "col": 0, "type": "external", "label": "IP Camera", "sublabel": "RTSP / go2rtc" },
+    { "id": "go2rtc", "lane": "stream", "col": 1, "type": "cloud", "label": "go2rtc", "sublabel": "frame.jpeg" },
+    { "id": "capture", "lane": "detect", "col": 2, "type": "backend", "label": "Capture Thread", "sublabel": "holder + seq", "tag": "buffer=1" },
+    { "id": "yolo", "lane": "detect", "col": 3, "type": "backend", "label": "YOLOv8 predict", "sublabel": "person, conf≥conf", "tag": "frame_skip" },
+    { "id": "verify", "lane": "ai", "col": 4, "type": "backend", "label": "verify_scene()", "sublabel": "ảnh + prompt" },
+    { "id": "verdict", "lane": "ai", "col": 5, "type": "security", "label": "Verdict", "sublabel": "SAFE / EMERGENCY" },
+    { "id": "record", "lane": "alert", "col": 3, "type": "messagebus", "label": "Ghi clip", "sublabel": "record_and_upload_clip", "tag": "record_cooldown" },
+    { "id": "telegram", "lane": "alert", "col": 5, "type": "cloud", "label": "Telegram", "sublabel": "sendPhoto", "tag": "alert_cooldown" },
+    { "id": "timeline", "lane": "store", "col": 4, "type": "database", "label": "log_event", "sublabel": "SQLite WAL" },
+    { "id": "teldrive", "lane": "store", "col": 5, "type": "cloud", "label": "Teldrive", "sublabel": "clip + thumbnail" }
+  ],
+  "edges": [
+    { "from": "cam", "to": "go2rtc", "variant": "default" },
+    { "from": "go2rtc", "to": "capture", "label": "frame", "variant": "emphasis", "fromSide": "bottom", "toSide": "top", "route": "drop", "labelAt": [262, 166] },
+    { "from": "cam", "to": "capture", "label": "RTSP fallback", "variant": "dashed", "fromSide": "bottom", "toSide": "left", "route": "drop", "labelAt": [150, 166] },
+    { "from": "capture", "to": "yolo", "variant": "default" },
+    { "from": "yolo", "to": "verify", "label": "person + verify_interval", "variant": "emphasis", "fromSide": "bottom", "toSide": "top", "route": "drop", "labelAt": [465, 290] },
+    { "from": "verify", "to": "verdict", "variant": "default" },
+    { "from": "verdict", "to": "telegram", "label": "EMERGENCY", "variant": "security", "fromSide": "bottom", "toSide": "top", "route": "drop", "labelAt": [625, 414] },
+    { "from": "yolo", "to": "record", "label": "person", "variant": "dashed", "fromSide": "bottom", "toSide": "top", "route": "drop", "labelAt": [430, 414] },
+    { "from": "verdict", "to": "timeline", "label": "log_event", "variant": "default", "fromSide": "bottom", "toSide": "top", "route": "drop", "bias": 0.07, "labelAt": [500, 538] },
+    { "from": "record", "to": "teldrive", "label": "upload", "variant": "dashed", "fromSide": "bottom", "toSide": "top", "route": "drop", "labelAt": [575, 538] }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Vòng lặp giám sát", "items": ["Mỗi camera 1 Capture Thread; Monitor đọc frame mới qua seq", "frame_skip giảm tải: chỉ chạy YOLO 1/N khung hình", "loop_sleep nhịp lại giữa các vòng quét"] },
+    { "dot": "emerald", "title": "Điều kiện gọi AI", "items": ["Chỉ verify khi YOLO thấy person (class 0)", "Phải quá verify_interval kể từ lần verify trước", "Verdict EMERGENCY mới kích hoạt cảnh báo"] },
+    { "dot": "rose", "title": "Cảnh báo & lưu vết", "items": ["Telegram chỉ gửi khi quá alert_cooldown (chống spam)", "Ghi clip chạy thread riêng, copy-codec để nhẹ CPU", "Mọi giai đoạn đều log_event vào SQLite"] }
+  ]
+}

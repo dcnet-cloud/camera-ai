@@ -1,0 +1,12 @@
+{
+  "title": "DCNET Camera AI — Luồng hoạt động hệ thống",
+  "subtitle": "Fall Detection Web · sơ đồ kiến trúc & luồng AI",
+  "lede": "Bộ sơ đồ phân tích chi tiết luồng hoạt động của hệ thống giám sát camera AI (<code>fall_detection_web</code>): từ thu nhận khung hình, phát hiện người bằng YOLO, đến xác minh bằng AI Vision, cảnh báo và lưu trữ. Hai sơ đồ cuối là <b>phần chuyên sâu dành riêng cho luồng hoạt động của AI</b>.",
+  "diagrams": [
+    { "file": "system-architecture.html", "title": "Kiến trúc hệ thống", "kind": "architecture", "accent": "primary", "desc": "Toàn cảnh thành phần: Camera → go2rtc → Monitor/YOLO/AI Client → AI Vision, Telegram, Teldrive, SQLite, Redis." },
+    { "file": "operational-workflow.html", "title": "Luồng vận hành Monitor", "kind": "workflow", "accent": "secondary", "desc": "Vòng lặp giám sát theo swimlane: capture → YOLO → verify → verdict → cảnh báo, ghi clip và timeline." },
+    { "file": "ai-verification-sequence.html", "title": "🤖 Luồng AI · verify_scene", "kind": "sequence", "accent": "violet", "desc": "Trình tự gọi Vision API theo thời gian: model chính, tự fallback khi lỗi, parse verdict rồi cảnh báo + log." },
+    { "file": "ai-data-pipeline.html", "title": "🤖 Luồng AI · dữ liệu", "kind": "dataflow", "accent": "accent", "desc": "Đường đi dữ liệu AI: mã hoá ảnh + prompt → Vision API → parse phản hồi (SSE/JSON/think) → SAFE/EMERGENCY." }
+  ],
+  "footer": "Sinh bằng skill <b>dcnet-diagram</b>. Sửa JSON-IR trong <code>src/</code> rồi chạy lại renderer để cập nhật."
+}
