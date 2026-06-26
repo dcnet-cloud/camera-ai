@@ -17,7 +17,9 @@ services:
 
   fall_detection_web:
     build: ./fall_detection_web
-    env_file: ./fall_detection_web/.env
+    env_file:
+      - path: ./fall_detection_web/.env
+        required: false
     environment:
       DATABASE_URL: postgresql://dcnet:${DB_PASSWORD:-dcnet_dev}@postgres:5432/dcnet
     volumes:
