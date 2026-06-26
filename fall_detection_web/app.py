@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import secrets
 import psutil
 from contextlib import asynccontextmanager
@@ -171,6 +172,62 @@ def api_counting(_: str = Depends(auth.require_auth)):
         "occupancy": occ["occupancy"], "in": occ["in"], "out": occ["out"],
         "hourly": hourly, "log": log_rows,
     }
+
+
+def _reid_enabled() -> bool:
+    return os.environ.get("REID_ENABLED", "false").lower() == "true"
+
+
+@app.get("/groups", response_class=HTMLResponse)
+def groups_page(request: Request, _: str = Depends(auth.require_auth)):
+    return templates.TemplateResponse(
+        request=request, name="groups.html",
+        context={"reid_enabled": _reid_enabled()})
+
+
+@app.get("/api/groups")
+def api_groups(_: str = Depends(auth.require_auth)):
+    from datetime import timezone, timedelta
+    vn = timezone(timedelta(hours=7))
+    groups = db.reid_live_groups()
+    stats = db.reid_stats()
+    out = []
+    for g in groups:
+        gid = g["id"]
+        crops = db.reid_group_crops(gid)
+        rep = g.get("rep_crop_path")
+        rep_name = Path(rep).name if rep else None
+        out.append({
+            "id": gid,
+            "visit_count": g["visit_count"],
+            "is_reentry": g["visit_count"] > 1,
+            "badge": "🔁 ĐÃ VÀO RỒI" if g["visit_count"] > 1 else "🆕 Khách mới",
+            "first_seen": g["first_seen"].astimezone(vn).strftime("%H:%M:%S %d/%m"),
+            "last_seen": g["last_seen"].astimezone(vn).strftime("%H:%M:%S %d/%m"),
+            "rep_crop": rep_name,
+            "crops": [
+                {"kind": c["kind"],
+                 "name": Path(c["path"]).name,
+                 "quality": round(float(c["quality"]), 2) if c["quality"] is not None else None,
+                 "ts": c["ts"].astimezone(vn).strftime("%H:%M:%S")}
+                for c in crops
+            ],
+        })
+    return {"reid_enabled": _reid_enabled(), "stats": stats, "groups": out}
+
+
+@app.get("/api/reid-crop/{group_id}/{filename}")
+def reid_crop(group_id: str, filename: str, _: str = Depends(auth.require_auth)):
+    if not group_id.isdigit():
+        raise HTTPException(status_code=404, detail="Not found")
+    safe_name = Path(filename).name
+    if safe_name != filename or not safe_name.lower().endswith(".jpg"):
+        raise HTTPException(status_code=404, detail="Not found")
+    path = db.REID_CROPS_DIR / group_id / safe_name
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail="Not found")
+    return FileResponse(path, media_type="image/jpeg",
+                        headers={"Cache-Control": "private, max-age=86400, immutable"})
 
 
 @app.get("/{page_name}", response_class=HTMLResponse)
