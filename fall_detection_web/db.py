@@ -24,6 +24,7 @@ from psycopg_pool import ConnectionPool
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data"
 EVENT_IMAGES_DIR = DATA_DIR / "event_images"
+REID_CROPS_DIR = DATA_DIR / "reid_crops"
 
 LOCAL_TZ = timezone(timedelta(hours=7))
 MAX_EVENTS = 5000
@@ -155,6 +156,51 @@ def init_db() -> None:
                     'rtsp://192.168.100.47/axis-media/media.amp', 'M3216-LVE', 'HCM')
             ON CONFLICT (cam_uid) DO NOTHING
         """)
+        # ── Phase 2: Re-ID group schema (module optional, OFF mặc định) ──
+        conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS person_group (
+                id               BIGSERIAL PRIMARY KEY,
+                cam_id           INT REFERENCES cameras(id),
+                first_seen       TIMESTAMPTZ NOT NULL,
+                last_seen        TIMESTAMPTZ NOT NULL,
+                visit_count      INT NOT NULL DEFAULT 1,
+                rep_body_vector  vector(512) NOT NULL,
+                rep_face_vector  vector(512),
+                rep_crop_path    TEXT,
+                created_at       TIMESTAMPTZ DEFAULT now()
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS person_group_last_seen ON person_group (last_seen DESC)")
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS person_group_body_ivf ON person_group
+            USING ivfflat (rep_body_vector vector_cosine_ops) WITH (lists = 100)
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS appearance (
+                id           BIGSERIAL PRIMARY KEY,
+                group_id     BIGINT REFERENCES person_group(id) ON DELETE CASCADE,
+                cam_id       INT REFERENCES cameras(id),
+                ts           TIMESTAMPTZ NOT NULL,
+                body_vector  vector(512) NOT NULL,
+                face_vector  vector(512),
+                track_id     TEXT,
+                created_at   TIMESTAMPTZ DEFAULT now()
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS appearance_group ON appearance (group_id, ts DESC)")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS appearance_crop (
+                id             BIGSERIAL PRIMARY KEY,
+                appearance_id  BIGINT REFERENCES appearance(id) ON DELETE CASCADE,
+                kind           TEXT NOT NULL CHECK (kind IN ('body','face')),
+                path           TEXT NOT NULL,
+                frame_idx      INT,
+                quality        REAL,
+                created_at     TIMESTAMPTZ DEFAULT now()
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS appearance_crop_app ON appearance_crop (appearance_id)")
 
 
 def now_iso() -> str:
@@ -658,3 +704,43 @@ def counting_crossings(day: date, cam_id: int | None = None) -> list[dict[str, A
     with get_conn() as conn:
         rows = conn.execute(sql, tuple(params)).fetchall()
     return [{"ts": r["ts"], "direction": r["direction"]} for r in rows]
+
+
+# ── Re-ID groups (Phase 2, read-only; worker ghi) ──
+
+def reid_live_groups(ttl_hours: float = 2, cam_id: int | None = None) -> list[dict[str, Any]]:
+    where = "last_seen >= now() - (%s || ' hours')::interval"
+    params: list[Any] = [str(ttl_hours)]
+    if cam_id is not None:
+        where += " AND cam_id = %s"
+        params.append(cam_id)
+    sql = (
+        "SELECT id, visit_count, first_seen, last_seen, rep_crop_path "
+        f"FROM person_group WHERE {where} ORDER BY last_seen DESC"
+    )
+    with get_conn() as conn:
+        rows = conn.execute(sql, tuple(params)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def reid_group_crops(group_id: int, limit: int = 40) -> list[dict[str, Any]]:
+    sql = (
+        "SELECT ac.kind, ac.path, ac.quality, a.ts "
+        "FROM appearance a JOIN appearance_crop ac ON ac.appearance_id = a.id "
+        "WHERE a.group_id = %s ORDER BY a.ts DESC, ac.kind LIMIT %s"
+    )
+    with get_conn() as conn:
+        rows = conn.execute(sql, (group_id, limit)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def reid_stats(ttl_hours: float = 2) -> dict[str, int]:
+    sql = (
+        "SELECT COUNT(*) AS unique_count, "
+        "COUNT(*) FILTER (WHERE visit_count > 1) AS reentry_count "
+        "FROM person_group WHERE last_seen >= now() - (%s || ' hours')::interval"
+    )
+    with get_conn() as conn:
+        row = conn.execute(sql, (str(ttl_hours),)).fetchone()
+    return {"unique_count": int(row["unique_count"] or 0),
+            "reentry_count": int(row["reentry_count"] or 0)}

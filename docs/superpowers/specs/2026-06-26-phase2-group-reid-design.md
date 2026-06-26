@@ -1,7 +1,7 @@
 # Design — Phase 2: Module Group / Re-ID
 
 **Ngày:** 2026-06-26
-**Trạng thái:** DESIGN (chờ review)
+**Trạng thái:** DONE (implemented, shelved — plan `../plans/2026-06-26-phase2-group-reid.md`, branch `feat/phase2-group-reid`; module OFF mặc định, image build + activate deferred)
 **Phase:** 2 / 5 (xem tổng thể: `2026-06-26-dcnet-platform-migration-design.md`)
 **Tiền đề:** Phase 1 DONE + merged — Postgres chứa `cameras` + `events`, `event_collector` chạy, trang "Đếm ra/vào" live.
 **Nguồn port:** repo `dcnet-cloud/camera` — `services/reid_worker/` (pipeline Re-ID async), `services/dashboard/src/dashboard/pages/2_Nhom_Theo_Nguoi.py` + `groups.py` (UI), schema Re-ID trong `db/init.sql` (`person_group`/`appearance`/`appearance_crop`), findings `docs/reid-capture-findings.md`.
