@@ -112,9 +112,9 @@ CREATE TABLE settings (               -- 3-tier config tier giữa; cameras/prom
 
 3-tier `env/.env > settings(DB) > DEFAULT_CONFIG` giữ nguyên; chỉ đổi nguồn tier giữa từ SQLite settings → Postgres settings (qua `db.py` mới). Legacy `config.json` auto-migrate giữ (chạy 1 lần). Thêm env DSN (`DATABASE_URL` hoặc `DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME`) vào `ENV_CONFIG_KEYS`/`.env.example`.
 
-## P0.5 Data migration (1 lần)
+## P0.5 Data migration (1 lần) — **OPTIONAL (greenfield, đã chốt)**
 
-Script `migrate_sqlite_to_pg.py`: đọc `data/fall_detection.db` (nếu có) → copy `events`→`incidents`, `users`, `settings` sang Postgres. Idempotent (ON CONFLICT). Cho deployment FDW hiện hữu không mất data. Greenfield (chưa có .db) → skip.
+**Quyết review: greenfield — chưa có deployment FDW thật cần giữ data.** Script `migrate_sqlite_to_pg.py` (đọc `data/fall_detection.db` → copy `events`→`incidents`/`users`/`settings`, idempotent ON CONFLICT) là **optional, KHÔNG bắt buộc Phase 0**. Bỏ qua; chỉ làm sau nếu xuất hiện .db cần giữ.
 
 ## P0.6 Deploy
 
@@ -146,7 +146,7 @@ FDW **không có test suite** (chuẩn repo: verify bằng chạy app). Phase 0 
 | Thread-safety Postgres | `psycopg_pool.ConnectionPool` thay 1 connection/thread |
 | Va chạm tên `events` | Đổi `incidents` ngay Phase 0 (trước khi counting `events` vào Phase 1) |
 
-## P0.10 Open questions (xác nhận khi review)
+## P0.10 Quyết định đã chốt (review 2026-06-26)
 
-1. DB target: Postgres MỚI trong camera-ai (khuyến nghị, sạch) hay trỏ vào Postgres DCNET sẵn có? → đề xuất **mới**, gộp dần.
-2. Có deployment FDW thật đang chạy cần giữ data (cần script migrate) hay greenfield? → ảnh hưởng P0.5 bắt buộc hay optional.
+1. **DB target = Postgres MỚI trong camera-ai** (compose riêng, `pgvector/pgvector:pg16`). Độc lập prod DCNET live, gộp schema counting/Re-ID vào dần ở phase sau.
+2. **Greenfield** — chưa có data FDW thật → data-migration script (P0.5) **optional, skip**. Verification Phase 0 bỏ bước migrate-data; tập trung init schema + CRUD trên Postgres sạch.
