@@ -688,17 +688,18 @@ def cam_id_for(cam_uid: str) -> int | None:
 
 def counting_occupancy_today(cam_id: int | None = None) -> dict[str, int]:
     """IN/OUT/occupancy của NGÀY VN hiện tại. occupancy clamp >= 0."""
-    where = "type = 'counter' AND (ts AT TIME ZONE 'Asia/Ho_Chi_Minh')::date " \
+    where = "e.type = 'counter' AND (e.ts AT TIME ZONE 'Asia/Ho_Chi_Minh')::date " \
             "= (now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date"
     params: tuple[Any, ...] = ()
     if cam_id is not None:
-        where += " AND cam_id = %s"
+        where += " AND e.cam_id = %s"
         params = (cam_id,)
     sql = (
         "SELECT "
-        "COUNT(*) FILTER (WHERE direction = 'in')  AS ins, "
-        "COUNT(*) FILTER (WHERE direction = 'out') AS outs "
-        f"FROM events WHERE {where}"
+        "COUNT(*) FILTER (WHERE e.direction = 'in')  AS ins, "
+        "COUNT(*) FILTER (WHERE e.direction = 'out') AS outs "
+        "FROM events e JOIN cameras c ON c.id = e.cam_id "
+        f"WHERE c.enabled = true AND c.counting_enabled = true AND {where}"
     )
     with get_conn() as conn:
         row = conn.execute(sql, params).fetchone()
@@ -709,12 +710,15 @@ def counting_occupancy_today(cam_id: int | None = None) -> dict[str, int]:
 
 def counting_crossings(day: date, cam_id: int | None = None) -> list[dict[str, Any]]:
     """Crossing rows của 1 ngày VN — cho bucket_hourly + log. ts trả về aware UTC."""
-    where = "type = 'counter' AND (ts AT TIME ZONE 'Asia/Ho_Chi_Minh')::date = %s"
+    where = "e.type = 'counter' AND (e.ts AT TIME ZONE 'Asia/Ho_Chi_Minh')::date = %s"
     params: list[Any] = [day]
     if cam_id is not None:
-        where += " AND cam_id = %s"
+        where += " AND e.cam_id = %s"
         params.append(cam_id)
-    sql = f"SELECT ts, direction FROM events WHERE {where} ORDER BY ts DESC"
+    sql = (
+        f"SELECT e.ts, e.direction FROM events e JOIN cameras c ON c.id = e.cam_id "
+        f"WHERE c.enabled = true AND c.counting_enabled = true AND {where} ORDER BY e.ts DESC"
+    )
     with get_conn() as conn:
         rows = conn.execute(sql, tuple(params)).fetchall()
     return [{"ts": r["ts"], "direction": r["direction"]} for r in rows]
