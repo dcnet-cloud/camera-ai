@@ -155,6 +155,51 @@ def init_db() -> None:
                     'rtsp://192.168.100.47/axis-media/media.amp', 'M3216-LVE', 'HCM')
             ON CONFLICT (cam_uid) DO NOTHING
         """)
+        # ── Phase 2: Re-ID group schema (module optional, OFF mặc định) ──
+        conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS person_group (
+                id               BIGSERIAL PRIMARY KEY,
+                cam_id           INT REFERENCES cameras(id),
+                first_seen       TIMESTAMPTZ NOT NULL,
+                last_seen        TIMESTAMPTZ NOT NULL,
+                visit_count      INT NOT NULL DEFAULT 1,
+                rep_body_vector  vector(512) NOT NULL,
+                rep_face_vector  vector(512),
+                rep_crop_path    TEXT,
+                created_at       TIMESTAMPTZ DEFAULT now()
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS person_group_last_seen ON person_group (last_seen DESC)")
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS person_group_body_ivf ON person_group
+            USING ivfflat (rep_body_vector vector_cosine_ops) WITH (lists = 100)
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS appearance (
+                id           BIGSERIAL PRIMARY KEY,
+                group_id     BIGINT REFERENCES person_group(id) ON DELETE CASCADE,
+                cam_id       INT REFERENCES cameras(id),
+                ts           TIMESTAMPTZ NOT NULL,
+                body_vector  vector(512) NOT NULL,
+                face_vector  vector(512),
+                track_id     TEXT,
+                created_at   TIMESTAMPTZ DEFAULT now()
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS appearance_group ON appearance (group_id, ts DESC)")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS appearance_crop (
+                id             BIGSERIAL PRIMARY KEY,
+                appearance_id  BIGINT REFERENCES appearance(id) ON DELETE CASCADE,
+                kind           TEXT NOT NULL CHECK (kind IN ('body','face')),
+                path           TEXT NOT NULL,
+                frame_idx      INT,
+                quality        REAL,
+                created_at     TIMESTAMPTZ DEFAULT now()
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS appearance_crop_app ON appearance_crop (appearance_id)")
 
 
 def now_iso() -> str:
