@@ -25,13 +25,15 @@ camera-ai đang trở thành **sản phẩm hợp nhất** của DCNET: đổ lo
 | Tổng thể | [migration design](docs/superpowers/specs/2026-06-26-dcnet-platform-migration-design.md) | — |
 | 0. Unify DB (SQLite→Postgres) | (trong migration design) + [plan](docs/superpowers/plans/2026-06-26-phase0-unify-db-postgres.md) | ✅ DONE + merged (PR #1) |
 | 1. Module Đếm | [phase1-counting](docs/superpowers/specs/2026-06-26-phase1-counting-design.md) + [plan](docs/superpowers/plans/2026-06-26-phase1-counting.md) | ✅ DONE (pipeline live-verified; chờ organic crossing để chốt số) |
-| 2. Module Group/Re-ID | [phase2-group-reid](docs/superpowers/specs/2026-06-26-phase2-group-reid-design.md) | spec ✅, chờ plan |
+| 2. Module Group/Re-ID | [phase2-group-reid](docs/superpowers/specs/2026-06-26-phase2-group-reid-design.md) + [plan](docs/superpowers/plans/2026-06-26-phase2-group-reid.md) | ✅ DONE (shelved, OFF mặc định; image build defer x86) |
 | 3. Modular per-customer | [phase3-modular-percustomer](docs/superpowers/specs/2026-06-26-phase3-modular-percustomer-design.md) | spec ✅, chờ plan |
 | 4. Deploy/cutover | [phase4-deploy-cutover](docs/superpowers/specs/2026-06-26-phase4-deploy-cutover-design.md) | spec ✅, chờ plan |
 
 **Phase 0 đã đổi:** `db.py` SQLite→Postgres (psycopg), bảng FDW `events`→`incidents`. Implement tuần tự (mỗi phase phụ thuộc phase trước). Khi implement 1 phase: load spec đó → `writing-plans` → `subagent-driven-development` → PR → merge.
 
 **Phase 1 đã thêm:** service `services/event_collector/` (async aiomqtt+asyncpg, store-only MQTT→Postgres, idempotent INSERT, `MQTT_CLIENT_ID=event_collector_cameraai` DUY NHẤT — đọc ké broker cloud `camera-test.dcnet.vn:8883` TLS, KHÔNG kick collector DCNET prod); bảng `cameras`+`events` trong `init_db()` (collector cũng tự `ensure_schema` boot, tránh race); `counting.py` (pure VN+7 bucketing); route `/counting`+`/api/counting` (poll 3s) + `templates/counting.html`. Đếm = COUNT rows query-time, occupancy clamp ≥0. ⚠️ **Phase 4 reconcile:** FDW có 2 file requirements diverge (`requirements.txt` `+cpu` wheels vs `requirements.docker.txt` plain torch — workaround build arm64); chốt 1 strategy cho x86 prod.
+
+**Phase 2 đã thêm (SHELVED, OFF mặc định):** service `services/reid_worker/` (async aiomqtt+asyncpg+OSNet/InsightFace, **profile `reid`** — `docker compose --profile reid up` mới start; `MQTT_CLIENT_ID=reid_worker_cameraai`, topic `poc/objsnap`, FACE off, OQ2 file-purge trong purge_loop); 3 bảng pgvector `person_group`/`appearance`/`appearance_crop` + ivfflat trong `init_db()`; `db.py` read fns (`reid_live_groups`/`reid_group_crops`/`reid_stats` + `REID_CROPS_DIR`); routes `/groups`+`/api/groups`+`/api/reid-crop/{group_id}/{filename}` (FileResponse, path-validated) + `templates/groups.html` (banner khi OFF, poll 15s) + nav link. Worker + FDW share volume `fdw_data:/app/data` (CRITICAL — crop serving). **2 blocker chưa giải (build-and-shelve):** cam dome placement NO-GO + OSNet/InsightFace non-commercial (`REID_COMMERCIAL_MODE=true`→exit). ⚠️ **Image build DEFERRED x86** (arm64 torch blocked) — Phase 2 verify = schema+pure tests(24, numpy-only)+queries+UI mock; build+live worker khi activate. Đường bật lại: spec §2.6.
 
 ## Read the AGENTS.md before editing either app
 
