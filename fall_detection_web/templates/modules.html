@@ -41,65 +41,6 @@
     h1, h2, h3, p { margin: 0; }
     button, input { font: inherit; cursor: pointer; }
 
-    /* ── app shell ── */
-    .app {
-      min-height: 100vh;
-      display: grid;
-      grid-template-columns: var(--sidebar) minmax(0, 1fr);
-    }
-    .sidebar {
-      position: sticky;
-      top: 0;
-      height: 100vh;
-      padding: 18px;
-      border-right: 1px solid var(--line);
-      background: rgba(2, 6, 23, .78);
-      backdrop-filter: blur(18px);
-      display: flex;
-      flex-direction: column;
-      gap: 18px;
-      z-index: 20;
-    }
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      min-height: 54px;
-    }
-    .brand-mark {
-      width: 44px; height: 44px;
-      border-radius: var(--radius);
-      display: inline-flex; align-items: center; justify-content: center;
-      color: var(--good); flex: 0 0 auto;
-      background: linear-gradient(180deg, rgba(34, 197, 94, .16), rgba(56, 189, 248, .08));
-      border: 1px solid rgba(34, 197, 94, .36);
-      box-shadow: inset 0 0 28px rgba(34, 197, 94, .08), 0 0 22px rgba(34, 197, 94, .10);
-    }
-    .brand h1 { font-size: 17px; letter-spacing: 0; }
-    .brand p { color: var(--muted); font-size: 12px; margin-top: 2px; }
-    .nav { display: grid; gap: 6px; }
-    .nav-btn {
-      width: 100%;
-      min-height: 42px;
-      border: 1px solid transparent;
-      border-radius: var(--radius);
-      background: transparent;
-      color: var(--muted);
-      padding: 9px 10px;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      text-align: left;
-      text-decoration: none;
-      transition: background .18s ease, border-color .18s ease, color .18s ease;
-    }
-    .nav-btn:hover { color: var(--text); background: rgba(30, 41, 59, .62); }
-    .nav-btn.active {
-      color: var(--text);
-      border-color: rgba(34, 197, 94, .42);
-      background: rgba(34, 197, 94, .12);
-    }
-    .sidebar-foot { margin-top: auto; display: grid; gap: 10px; }
     .btn {
       min-height: 40px;
       border: 1px solid var(--line-strong);
@@ -135,44 +76,12 @@
     .badge.off { background: rgba(148, 163, 184, .18); color: var(--muted); }
     #msg { margin-top: 12px; font-size: .82rem; color: var(--muted); min-height: 1.2em; }
 
-    @media (max-width: 1100px) {
-      .app { grid-template-columns: 1fr; }
-      .sidebar { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
-      .nav { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-      .sidebar-foot { display: none; }
-    }
-    @media (max-width: 720px) {
-      .nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    }
   </style>
+  {% include "_sidebar_css.html" %}
 </head>
 <body>
   <div class="app">
-    <aside class="sidebar">
-      <div class="brand">
-        <div class="brand-mark" aria-hidden="true"></div>
-        <div>
-          <h1>DCNET Camera</h1>
-          <p>Camera operations console</p>
-        </div>
-      </div>
-      <nav class="nav" aria-label="Primary">
-        <a class="nav-btn" href="/">Dashboard</a>
-        <a class="nav-btn" href="/cameras">Cameras</a>
-        <a class="nav-btn" href="/counting">Đếm ra/vào</a>
-        <a class="nav-btn" href="/groups">Nhóm theo người</a>
-        <a class="nav-btn active" href="/modules">Module camera</a>
-        <a class="nav-btn" href="/prompts">Prompts</a>
-        <a class="nav-btn" href="/live">Live View</a>
-        <a class="nav-btn" href="/settings">Settings</a>
-        <a class="nav-btn" href="/tools">Tools</a>
-      </nav>
-      <div class="sidebar-foot">
-        <form action="/auth/logout" method="post">
-          <button class="btn danger" type="submit" style="width:100%">Logout</button>
-        </form>
-      </div>
-    </aside>
+    {% include "_sidebar.html" %}
 
     <main class="main">
       <h1>Module camera (per-customer)</h1>

@@ -1,0 +1,25 @@
+<aside class="sidebar">
+  <div class="brand">
+    <div class="brand-mark" aria-hidden="true"></div>
+    <div>
+      <h1>Fall Detection</h1>
+      <p>Camera operations console</p>
+    </div>
+  </div>
+  <nav class="nav" aria-label="Primary">
+    <a class="nav-btn{% if active_nav == 'dashboard' %} active{% endif %}" href="/">Dashboard</a>
+    <a class="nav-btn{% if active_nav == 'cameras' %} active{% endif %}" href="/cameras">Cameras</a>
+    <a class="nav-btn{% if active_nav == 'counting' %} active{% endif %}" href="/counting">Đếm ra/vào</a>
+    <a class="nav-btn{% if active_nav == 'groups' %} active{% endif %}" href="/groups">Nhóm theo người</a>
+    <a class="nav-btn{% if active_nav == 'modules' %} active{% endif %}" href="/modules">Module camera</a>
+    <a class="nav-btn{% if active_nav == 'prompts' %} active{% endif %}" href="/prompts">Prompts</a>
+    <a class="nav-btn{% if active_nav == 'live' %} active{% endif %}" href="/live">Live View</a>
+    <a class="nav-btn{% if active_nav == 'settings' %} active{% endif %}" href="/settings">Settings</a>
+    <a class="nav-btn{% if active_nav == 'tools' %} active{% endif %}" href="/tools">Tools</a>
+  </nav>
+  <div class="sidebar-foot">
+    <form action="/auth/logout" method="post">
+      <button class="btn danger" type="submit">Logout</button>
+    </form>
+  </div>
+</aside>
