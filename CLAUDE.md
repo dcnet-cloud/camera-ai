@@ -16,9 +16,11 @@ This is a **monorepo of two independent applications** that share only a domain 
 
 **Diagrams** ([`docs/diagrams/`](docs/diagrams)) are produced by the `dcnet-diagram` skill: each `.html` is self-contained (dark/light toggle, PNG/SVG export) and re-rendered from its JSON-IR in `docs/diagrams/src/`. Start from [`docs/diagrams/README.md`](docs/diagrams/README.md) (file index + how-to) and [`docs/diagrams/EXPLAINER.md`](docs/diagrams/EXPLAINER.md) (per-diagram detail + provenance). To update a diagram, edit the `src/*.json`, re-run the matching renderer, then rebuild the gallery (`build_gallery.py manifest.json .`). Keep diagrams in sync when either app's flow changes. This `docs/diagrams/` folder is mirrored identically in the sibling `camera-check` repo.
 
-## DCNET Platform Migration (đang triển khai — 2026-06-26)
+## DCNET Platform Migration (2026-06-26)
 
 camera-ai đang trở thành **sản phẩm hợp nhất** của DCNET: đổ logic từ repo `dcnet-cloud/camera` (đếm người ra/vào + Re-ID) vào `fall_detection_web`, mỗi feature = module bật/tắt per-customer, DB thống nhất PostgreSQL. Chia 5 phase, mỗi phase 1 spec→plan→PR. **Design specs ở `docs/superpowers/specs/`, plans ở `docs/superpowers/plans/`.**
+
+> **🟢 STATUS (2026-06-26): MIGRATION CODE-COMPLETE — CHƯA DEPLOY PROD.** Phase 0-3 implemented+merged (PR #1-4), Phase 4 = **PREP only** merged (PR #5: artifacts + runbook, KHÔNG cutover). Còn lại 1 việc: **deploy VM thật** (camera-test.dcnet.vn) — session riêng qua skill `dcnet-deploy` theo `docs/ops/2026-06-26-phase4-cutover-runbook.md` (cần cred + cutover window). Prod hiện vẫn chạy stack Streamlit DCNET cũ — camera-ai chưa lên prod. Dev test: `docker compose up -d` → `http://localhost:8090` (login `admin/admin`, đổi ngay khi prod).
 
 | Phase | Spec | Trạng thái |
 |---|---|---|
