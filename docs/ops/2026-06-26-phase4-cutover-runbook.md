@@ -34,7 +34,7 @@ Kiểm và giải quyết trên VM **trước khi** bắt đầu Giai đoạn A.
 | O5 | go2rtc image version pin | Chọn version tại `https://github.com/AlexxIT/go2rtc/releases`; mặc định đề xuất `alexxit/go2rtc:latest` | Pin version trong `docker-compose.prod.yml` trước build (tránh regression do `latest` thay đổi) |
 | O6 | Backup cron postgres camera-ai | `crontab -l` trên VM | Nếu chưa có cron: thêm sau A5 (xem [§8.5 spec](2026-06-26-phase4-deploy-cutover-design.md)): `0 2 * * * docker exec camera-ai-postgres-1 pg_dump -U dcnet dcnet \| gzip > /opt/backup/dcnet_$(date +\%Y\%m\%d).sql.gz` |
 | O7 | Broker migration (alternate) | N/A | **DEFER** hậu-cutover — mosquitto DCNET giữ chạy vô thời hạn (§2.1 spec) |
-| O8 | Thêm user viewer ngoài admin sau cutover | FDW hiện **không có** route `/admin/users` (Phase 3 chưa implement) | Tạo user bằng INSERT trực tiếp vào postgres camera-ai: `docker exec -it camera-ai-postgres-1 psql -U dcnet dcnet -c "INSERT INTO users (email, password_hash, role) VALUES ('user@dcnet.vn', '<bcrypt_hash>', 'viewer');"` — tạo bcrypt hash với: `python3 -c "import bcrypt; print(bcrypt.hashpw(b'password', bcrypt.gensalt()).decode())"` |
+| O8 | Thêm user sau cutover | FDW hiện **không có** route `/admin/users` (Phase 3 chưa implement). **Không có role tier** — mọi user đều full access (không có viewer/admin phân quyền). | Tạo user bằng INSERT trực tiếp vào postgres camera-ai (schema thực tế: `username`, `password_hash`, `created_at` — không có cột `email` hay `role`): `docker exec -it camera-ai-postgres-1 psql -U dcnet dcnet -c "INSERT INTO users (username, password_hash, created_at) VALUES ('newuser', '<bcrypt_hash>', now()::text);"` — tạo bcrypt hash với: `python3 -c "import bcrypt; print(bcrypt.hashpw(b'password', bcrypt.gensalt()).decode())"` |
 | O9 | Auth gate cho `/live/*` và `/cam/*` | Kiểm FDW code: `curl -s -o /dev/null -w "%{http_code}" http://localhost:8090/api/auth/check` sau khi stack camera-ai up | **ĐÃ GIẢI — Task 3:** forward_auth + `/api/auth/check` đã implement. `/live/*` trong Caddyfile post-flip dùng `forward_auth fall_detection_web:8090 { uri /api/auth/check }` (xem `Caddyfile.post-flip.draft`) |
 
 ---
@@ -183,6 +183,15 @@ docker exec camera-ai-postgres-1 date
 # Kiểm UNIQUE constraint (bình thường — ON CONFLICT DO NOTHING):
 docker compose -f docker-compose.prod.yml logs event_collector | grep 'conflict'
 ```
+
+> **Debug tip — dashboard hiển thị 0 dù collector đang INSERT:**
+> Nếu `SELECT count(*) FROM events` tăng (collector OK) nhưng trang đếm vẫn show 0, nguyên nhân gần nhất là `counting_enabled` chưa được set trên camera. Cột này được seed bởi `init_db()` trong **FDW** (idempotent `UPDATE cameras SET counting_enabled=true WHERE cam_uid='B8A44F4627CE'`), chạy khi FDW khởi động — **không phải** collector. Query đếm filter `enabled=true AND counting_enabled=true`; nếu FDW chưa boot xong hoặc `init_db()` chưa chạy thì counting_enabled=false → kết quả = 0.
+> ```bash
+> # Xác nhận FDW đã chạy init_db:
+> docker compose -f docker-compose.prod.yml logs fall_detection_web | grep -E 'init_db|counting_enabled'
+> # Hoặc kiểm trực tiếp:
+> docker exec camera-ai-postgres-1 psql -U dcnet dcnet -c "SELECT cam_uid, enabled, counting_enabled FROM cameras;"
+> ```
 
 ---
 
