@@ -84,9 +84,12 @@
     {% include "_sidebar.html" %}
 
     <main class="main">
-      <h1>Module camera (per-customer)</h1>
-      <p class="cap">Bật/tắt module độc lập mỗi camera. Module chạy ⟺ camera <b>enabled</b> + flag bật.
-        (Registry counting/Re-ID. Camera fall-detection quản ở trang Cameras.)</p>
+      <header class="topbar">
+        <div class="page-title">
+          <h2>Module camera (per-customer)</h2>
+          <p>Bật/tắt module độc lập mỗi camera. Module chạy ⟺ camera <b>enabled</b> + flag bật. (Registry counting/Re-ID; camera fall-detection quản ở trang Cameras.)</p>
+        </div>
+      </header>
       <p class="cap" style="color:#f59e0b">Hiện chỉ <b>Đếm</b> wire vào hành vi; Fall-det/Re-ID/Live là flag chuẩn bị (wire ở deploy mixed multi-customer).</p>
       <table>
         <thead><tr>

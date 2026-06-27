@@ -99,8 +99,12 @@
     {% include "_sidebar.html" %}
 
     <main class="main">
-      <h1>👥 Nhóm theo người</h1>
-      <p class="cap">Gom lượt của cùng 1 người trong 2h gần nhất (ẩn danh). Badge 🔁 = đã vào rồi.</p>
+      <header class="topbar">
+        <div class="page-title">
+          <h2>Nhóm theo người</h2>
+          <p>Gom lượt của cùng 1 người trong 2h gần nhất (ẩn danh). Badge 🔁 = đã vào rồi.</p>
+        </div>
+      </header>
       {% if not reid_enabled %}
       <div class="banner">⚠️ Module Re-ID <b>chưa bật</b> (TẮT mặc định: cam dome NO-GO + license non-commercial).
         Bật = <code>docker compose --profile reid up -d reid_worker</code> + <code>REID_ENABLED=true</code>.
