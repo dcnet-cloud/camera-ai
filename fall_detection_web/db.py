@@ -201,6 +201,20 @@ def init_db() -> None:
             )
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS appearance_crop_app ON appearance_crop (appearance_id)")
+        # ── Phase 3: module flags per-camera ──
+        for col in ("counting_enabled", "fall_detection_enabled",
+                    "reid_enabled", "live_enabled"):
+            conn.execute(
+                f"ALTER TABLE cameras ADD COLUMN IF NOT EXISTS {col} "
+                "BOOLEAN NOT NULL DEFAULT false"
+            )
+        conn.execute("CREATE INDEX IF NOT EXISTS cameras_fall_det "
+                     "ON cameras (fall_detection_enabled) WHERE enabled = true")
+        conn.execute("CREATE INDEX IF NOT EXISTS cameras_counting "
+                     "ON cameras (counting_enabled) WHERE enabled = true")
+        # Seed: cam Axis = đếm + live (idempotent, SET true an toàn re-run)
+        conn.execute("UPDATE cameras SET counting_enabled=true, live_enabled=true "
+                     "WHERE cam_uid='B8A44F4627CE'")
 
 
 def now_iso() -> str:
@@ -674,17 +688,18 @@ def cam_id_for(cam_uid: str) -> int | None:
 
 def counting_occupancy_today(cam_id: int | None = None) -> dict[str, int]:
     """IN/OUT/occupancy của NGÀY VN hiện tại. occupancy clamp >= 0."""
-    where = "type = 'counter' AND (ts AT TIME ZONE 'Asia/Ho_Chi_Minh')::date " \
+    where = "e.type = 'counter' AND (e.ts AT TIME ZONE 'Asia/Ho_Chi_Minh')::date " \
             "= (now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date"
     params: tuple[Any, ...] = ()
     if cam_id is not None:
-        where += " AND cam_id = %s"
+        where += " AND e.cam_id = %s"
         params = (cam_id,)
     sql = (
         "SELECT "
-        "COUNT(*) FILTER (WHERE direction = 'in')  AS ins, "
-        "COUNT(*) FILTER (WHERE direction = 'out') AS outs "
-        f"FROM events WHERE {where}"
+        "COUNT(*) FILTER (WHERE e.direction = 'in')  AS ins, "
+        "COUNT(*) FILTER (WHERE e.direction = 'out') AS outs "
+        "FROM events e JOIN cameras c ON c.id = e.cam_id "
+        f"WHERE c.enabled = true AND c.counting_enabled = true AND {where}"
     )
     with get_conn() as conn:
         row = conn.execute(sql, params).fetchone()
@@ -695,12 +710,15 @@ def counting_occupancy_today(cam_id: int | None = None) -> dict[str, int]:
 
 def counting_crossings(day: date, cam_id: int | None = None) -> list[dict[str, Any]]:
     """Crossing rows của 1 ngày VN — cho bucket_hourly + log. ts trả về aware UTC."""
-    where = "type = 'counter' AND (ts AT TIME ZONE 'Asia/Ho_Chi_Minh')::date = %s"
+    where = "e.type = 'counter' AND (e.ts AT TIME ZONE 'Asia/Ho_Chi_Minh')::date = %s"
     params: list[Any] = [day]
     if cam_id is not None:
-        where += " AND cam_id = %s"
+        where += " AND e.cam_id = %s"
         params.append(cam_id)
-    sql = f"SELECT ts, direction FROM events WHERE {where} ORDER BY ts DESC"
+    sql = (
+        f"SELECT e.ts, e.direction FROM events e JOIN cameras c ON c.id = e.cam_id "
+        f"WHERE c.enabled = true AND c.counting_enabled = true AND {where} ORDER BY e.ts DESC"
+    )
     with get_conn() as conn:
         rows = conn.execute(sql, tuple(params)).fetchall()
     return [{"ts": r["ts"], "direction": r["direction"]} for r in rows]
@@ -744,3 +762,43 @@ def reid_stats(ttl_hours: float = 2) -> dict[str, int]:
         row = conn.execute(sql, (str(ttl_hours),)).fetchone()
     return {"unique_count": int(row["unique_count"] or 0),
             "reentry_count": int(row["reentry_count"] or 0)}
+
+
+# ── Camera module flags (Phase 3) ──
+
+_MODULE_COLS = {"counting", "fall_detection", "reid", "live"}
+
+
+def list_cameras_for_module(module: str) -> list[dict[str, Any]]:
+    """Cameras đang active có module bật. module ∈ counting|fall_detection|reid|live."""
+    if module not in _MODULE_COLS:
+        raise ValueError(f"unknown module: {module}")
+    col = f"{module}_enabled"
+    sql = (f"SELECT * FROM cameras WHERE enabled = true AND {col} = true ORDER BY id")
+    with get_conn() as conn:
+        rows = conn.execute(sql).fetchall()
+    return [dict(r) for r in rows]
+
+
+def list_cameras_all() -> list[dict[str, Any]]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, cam_uid, name, model, location, enabled, "
+            "counting_enabled, fall_detection_enabled, reid_enabled, live_enabled "
+            "FROM cameras ORDER BY id"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def update_camera_modules(cam_id: int, modules: dict[str, bool]) -> None:
+    """Cập nhật flag. modules keys ⊂ {counting,fall_detection,reid,live}."""
+    sets, params = [], []
+    for m in _MODULE_COLS:
+        if m in modules:
+            sets.append(f"{m}_enabled = %s")
+            params.append(bool(modules[m]))
+    if not sets:
+        return
+    params.append(cam_id)
+    with get_conn() as conn:
+        conn.execute(f"UPDATE cameras SET {', '.join(sets)} WHERE id = %s", tuple(params))

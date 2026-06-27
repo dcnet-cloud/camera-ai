@@ -230,6 +230,26 @@ def reid_crop(group_id: str, filename: str, _: str = Depends(auth.require_auth))
                         headers={"Cache-Control": "private, max-age=86400, immutable"})
 
 
+@app.get("/modules", response_class=HTMLResponse)
+def modules_page(request: Request, _: str = Depends(auth.require_auth)):
+    return templates.TemplateResponse(request=request, name="modules.html", context={})
+
+
+@app.get("/api/camera-modules")
+def api_camera_modules(_: str = Depends(auth.require_auth)):
+    return {"cameras": db.list_cameras_all()}
+
+
+@app.post("/api/camera-modules/{cam_id}")
+def api_update_camera_modules(cam_id: int, payload: dict[str, Any] = Body(...),
+                              _: str = Depends(auth.require_auth)):
+    modules = {m: bool(payload.get(m, False))
+               for m in ("counting", "fall_detection", "reid", "live")
+               if m in payload}
+    db.update_camera_modules(cam_id, modules)
+    return {"ok": True, "cam_id": cam_id, "modules": modules}
+
+
 @app.get("/{page_name}", response_class=HTMLResponse)
 def app_page(request: Request, page_name: str, _: str = Depends(auth.require_auth)):
     if page_name not in {"dashboard", "prompts", "live", "settings", "tools"}:
