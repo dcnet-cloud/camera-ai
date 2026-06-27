@@ -250,6 +250,13 @@ def api_update_camera_modules(cam_id: int, payload: dict[str, Any] = Body(...),
     return {"ok": True, "cam_id": cam_id, "modules": modules}
 
 
+@app.get("/api/auth/check")
+def auth_check(_: str = Depends(auth.require_auth)):
+    # Caddy forward_auth target: 200 nếu session JWT hợp lệ, 401 nếu không.
+    # Dùng để gate /live/* (go2rtc) + /cam/* sau khi bỏ Caddy basic_auth (Phase 4 flip).
+    return {"ok": True}
+
+
 @app.get("/{page_name}", response_class=HTMLResponse)
 def app_page(request: Request, page_name: str, _: str = Depends(auth.require_auth)):
     if page_name not in {"dashboard", "prompts", "live", "settings", "tools"}:

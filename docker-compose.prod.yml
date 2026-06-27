@@ -1,0 +1,95 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: dcnet
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: dcnet
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dcnet -d dcnet"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    # KHÔNG publish port — internal only
+
+  fall_detection_web:
+    build: ./fall_detection_web
+    env_file:
+      - path: ./.env
+        required: false
+    environment:
+      DATABASE_URL: postgresql://dcnet:${DB_PASSWORD}@postgres:5432/dcnet
+      SECRET_KEY: ${SECRET_KEY}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+    volumes:
+      - fdw_data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [default, dcnet-shared]
+    # KHÔNG publish port — Caddy reach qua dcnet-shared
+
+  event_collector:
+    build: ./services/event_collector
+    env_file:
+      - path: ./.env
+        required: false
+    environment:
+      DATABASE_URL: postgresql://dcnet:${DB_PASSWORD}@postgres:5432/dcnet
+      MQTT_HOST: ${MQTT_HOST:-camera-test.dcnet.vn}
+      MQTT_PORT: ${MQTT_PORT:-8883}
+      MQTT_TLS: ${MQTT_TLS:-true}
+      MQTT_USER: ${MQTT_USER:-}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-}
+      MQTT_CLIENT_ID: ${MQTT_CLIENT_ID:-event_collector_cameraai}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  go2rtc:
+    image: alexxit/go2rtc:latest
+    env_file:
+      - path: ./.env
+        required: false
+    volumes:
+      - ./go2rtc.yaml:/config/go2rtc.yaml:ro
+      - go2rtc_data:/config
+    restart: unless-stopped
+    networks: [default, dcnet-shared]
+    # Expose 1984 nội bộ; Caddy /live/* reach qua dcnet-shared. KHÔNG publish host port.
+
+  reid_worker:
+    build: ./services/reid_worker
+    profiles: ["reid"]
+    env_file:
+      - path: ./.env
+        required: false
+    environment:
+      DATABASE_URL: postgresql://dcnet:${DB_PASSWORD}@postgres:5432/dcnet
+      MQTT_CLIENT_ID: reid_worker_cameraai
+      REID_FACE_ENABLED: "false"
+      REID_TOPIC: poc/objsnap
+      DATA_DIR: /app/data
+    volumes:
+      - fdw_data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  fdw_data:
+  go2rtc_data:
+
+networks:
+  default:
+    name: camera-ai_default
+  dcnet-shared:
+    external: true   # pre-create trên VM: docker network create dcnet-shared
