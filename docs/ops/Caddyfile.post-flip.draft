@@ -1,0 +1,28 @@
+# camera-ai POST-FLIP — thay site block hiện tại (dashboard → FDW)
+# ⚠️ basic_auth ĐÃ BỎ site-wide → mọi route phải JWT-gated hoặc forward_auth.
+camera-test.dcnet.vn {
+    encode zstd gzip
+
+    # Live view (go2rtc WS) — gate qua FDW JWT trước khi forward
+    handle /live/* {
+        forward_auth fall_detection_web:8090 {
+            uri /api/auth/check
+            copy_headers Cookie
+        }
+        reverse_proxy go2rtc:1984 {
+            header_up Upgrade {http.request.header.Upgrade}
+            header_up Connection {http.request.header.Connection}
+        }
+    }
+
+    # Cam snapshot/mjpeg fallback (chỉ nếu go2rtc chưa verified — §2.7)
+    # handle /cam/* {
+    #     forward_auth fall_detection_web:8090 { uri /api/auth/check; copy_headers Cookie }
+    #     reverse_proxy cam_proxy:80
+    # }
+
+    handle {
+        reverse_proxy fall_detection_web:8090
+    }
+}
+# Mosquitto cert-sync logic KHÔNG đổi (broker 8883 mượn cert Caddy).
