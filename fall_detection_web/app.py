@@ -40,6 +40,7 @@ async def lifespan(app: FastAPI):
     db.init_db()
     db.delete_old_events(7)        # clean up old events/images at startup
     config.migrate_config_json()   # one-time: config.json → DB
+    config.migrate_cameras_to_table()  # one-time: settings-JSON cameras → cameras table
     current_config = config.read_config()
     monitor.start_local_clips_maintenance(current_config)
     
@@ -230,9 +231,10 @@ def reid_crop(group_id: str, filename: str, _: str = Depends(auth.require_auth))
                         headers={"Cache-Control": "private, max-age=86400, immutable"})
 
 
-@app.get("/modules", response_class=HTMLResponse)
-def modules_page(request: Request, _: str = Depends(auth.require_auth)):
-    return templates.TemplateResponse(request=request, name="modules.html", context={"active_nav": "modules"})
+@app.get("/modules")
+def modules_page(_: str = Depends(auth.require_auth)):
+    # Module management folded into the unified /cameras page.
+    return RedirectResponse(url="/cameras", status_code=status.HTTP_302_FOUND)
 
 
 @app.get("/api/camera-modules")
@@ -247,6 +249,9 @@ def api_update_camera_modules(cam_id: int, payload: dict[str, Any] = Body(...),
                for m in ("counting", "fall_detection", "reid", "live")
                if m in payload}
     db.update_camera_modules(cam_id, modules)
+    # CRITICAL: monitor binds its camera list at start; toggling fall_detection
+    # is a no-op until the monitor restarts. Refresh it so the toggle takes effect.
+    _refresh_monitor_after_camera_change()
     return {"ok": True, "cam_id": cam_id, "modules": modules}
 
 
@@ -490,22 +495,56 @@ def get_camera_detail(camera_name: str, _: str = Depends(auth.require_auth)):
     }
 
 
+# Keys the unified /cameras UI may submit per camera (config + module flags).
+_CAMERA_SUBMIT_KEYS = (
+    "name", "rtsp_url", "go2rtc_src", "mjpeg_url", "live_url", "live_mode",
+    "prompt_id", "vendor", "model", "location", "enabled",
+    "local_save_images", "local_save_videos", "teldrive_upload_images",
+    "teldrive_record_enabled", "record_seconds", "record_cooldown",
+    "counting_enabled", "fall_detection_enabled", "reid_enabled", "live_enabled",
+)
+
+
+def _refresh_monitor_after_camera_change() -> str:
+    """Re-read config from the table and restart/start the monitor so camera
+    edits and module toggles take effect immediately. Returns a status word."""
+    updated = config.read_config()
+    monitor.schedule_uploaded_local_clips_cleanup(updated, reason="cameras_saved")
+    if monitor.read_state().get("running"):
+        monitor.restart_monitor(updated)
+        return "restarted"
+    if monitor.has_enabled_rtsp_camera(updated):
+        return monitor.start_monitor(updated)
+    return "idle"
+
+
 @app.post("/api/cameras")
 def save_cameras(payload: dict[str, Any] = Body(...), _: str = Depends(auth.require_auth)):
     try:
-        current = config.read_config()
-        current["cameras"] = payload.get("cameras", [])
-        updated = config.write_config(current)
-        monitor.schedule_uploaded_local_clips_cleanup(updated, reason="cameras_saved")
-        state = monitor.read_state()
-        if state.get("running"):
-            monitor.restart_monitor(updated)
-            message = "Cameras saved and monitor restarted"
-        elif monitor.has_enabled_rtsp_camera(updated):
-            result = monitor.start_monitor(updated)
-            message = "Cameras saved and monitor started" if result == "started" else f"Cameras saved and monitor {result}"
-        else:
-            message = "Cameras saved"
+        incoming = payload.get("cameras", [])
+        if not isinstance(incoming, list):
+            raise ValueError("cameras must be a list")
+        existing_ids = {int(c["id"]) for c in db.cameras_for_config()}
+        seen: set[int] = set()
+        for cam in incoming:
+            if not isinstance(cam, dict):
+                continue
+            fields = {k: cam[k] for k in _CAMERA_SUBMIT_KEYS if k in cam}
+            cid = cam.get("id")
+            if cid is not None and int(cid) in existing_ids:
+                db.update_camera(int(cid), fields)
+                seen.add(int(cid))
+            else:
+                seen.add(db.insert_camera(fields))
+        # Cameras removed from the list → delete (soft if they have history).
+        for cid in existing_ids - seen:
+            db.delete_camera(cid)
+
+        result = _refresh_monitor_after_camera_change()
+        message = {"restarted": "Cameras saved and monitor restarted",
+                   "started": "Cameras saved and monitor started",
+                   "idle": "Cameras saved"}.get(result, f"Cameras saved (monitor {result})")
+        updated = config.read_config()
         return {
             "success": True,
             "message": message,

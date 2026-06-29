@@ -591,12 +591,22 @@ def go2rtc_video_only_params(params: dict[str, str]) -> dict[str, str]:
     return filtered
 
 
+def go2rtc_backend_base(config: dict[str, Any]) -> str:
+    """go2rtc base URL the BACKEND uses to fetch frames/clips.
+
+    Prefer go2rtc_internal_url (e.g. http://go2rtc:1984, the docker service)
+    over go2rtc_url, which is browser-facing (e.g. http://localhost:1984 in
+    dev, or a Caddy /live path in prod) and not reachable from this container.
+    """
+    return str(config.get("go2rtc_internal_url") or config.get("go2rtc_url") or "").strip().rstrip("/")
+
+
 def go2rtc_frame_request(config: dict[str, Any], camera: dict[str, Any]) -> tuple[str, dict[str, str], str]:
     raw_source = str(camera.get("go2rtc_src") or "").strip()
     if is_http_url(raw_source):
         return with_video_only_query(raw_source), {}, go2rtc_source(camera)
 
-    base_url = str(config.get("go2rtc_url", "")).strip().rstrip("/")
+    base_url = go2rtc_backend_base(config)
     src = go2rtc_source(camera)
     if not base_url or not src:
         raise ValueError("go2rtc URL or camera source is empty")
@@ -636,7 +646,7 @@ def fetch_go2rtc_frame_bytes(config: dict[str, Any], camera: dict[str, Any], tim
 
 
 def go2rtc_api_base(config: dict[str, Any], camera: dict[str, Any]) -> str:
-    base_url = str(config.get("go2rtc_url", "")).strip().rstrip("/")
+    base_url = go2rtc_backend_base(config)
     if base_url:
         return base_url
     raw_source = str(camera.get("go2rtc_src") or "").strip()
@@ -653,7 +663,7 @@ def has_go2rtc_frame_source(config: dict[str, Any], camera: dict[str, Any]) -> b
     raw_source = str(camera.get("go2rtc_src") or "").strip()
     if is_http_url(raw_source):
         return True
-    return bool(str(config.get("go2rtc_url", "")).strip() and go2rtc_source(camera))
+    return bool(go2rtc_backend_base(config) and go2rtc_source(camera))
 
 
 def record_go2rtc_clip(config: dict[str, Any], camera: dict[str, Any], output_path: Path) -> Path | None:
@@ -956,7 +966,13 @@ def capture_latest_frames(index: int, config: dict[str, Any], camera: dict[str, 
 
 
 def _enabled_monitor_cameras(config: dict[str, Any]) -> list[dict[str, Any]]:
-    all_cameras = [camera for camera in normalize_cameras(config) if camera.get("enabled")]
+    # Unified registry: a camera runs the YOLO pipeline only when its master
+    # `enabled` AND its `fall_detection_enabled` module flag are both on.
+    cameras = config.get("cameras") or normalize_cameras(config)
+    all_cameras = [
+        camera for camera in cameras
+        if camera.get("enabled") and camera.get("fall_detection_enabled")
+    ]
     return [
         camera
         for camera in all_cameras

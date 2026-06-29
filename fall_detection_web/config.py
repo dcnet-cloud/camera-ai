@@ -42,7 +42,8 @@ Mô tả dưới 20 ký tự
 # All values stored as TEXT; numeric types are coerced on read.
 DEFAULT_CONFIG: dict[str, Any] = {
     "rtsp_url": "",
-    "go2rtc_url": "",
+    "go2rtc_url": "",          # browser-facing (live iframe); e.g. http://localhost:1984
+    "go2rtc_internal_url": "", # backend-facing (frame/clip fetch); e.g. http://go2rtc:1984
     "prompts": [],          # stored as JSON string
     "cameras": [],          # stored as JSON string
     "telegram_bot_token": "",
@@ -81,6 +82,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
 ENV_CONFIG_KEYS: dict[str, str] = {
     "RTSP_URL": "rtsp_url",
     "GO2RTC_URL": "go2rtc_url",
+    "GO2RTC_INTERNAL_URL": "go2rtc_internal_url",
     "TELEGRAM_BOT_TOKEN": "telegram_bot_token",
     "TELEGRAM_CHAT_ID": "telegram_chat_id",
     "AI_BASE_URL": "ai_base_url",
@@ -310,6 +312,87 @@ def normalize_cameras(config: dict[str, Any]) -> list[dict[str, Any]]:
     return cameras
 
 
+_MODULE_FLAG_KEYS = ("counting_enabled", "fall_detection_enabled",
+                     "reid_enabled", "live_enabled")
+
+
+def cameras_from_table(config: dict[str, Any]) -> list[dict[str, Any]]:
+    """Unified registry → monitor's camera dict shape.
+
+    Source of truth is the Postgres `cameras` table (not settings-JSON). Each
+    row carries config columns + 4 module flags + id/cam_uid. Returns ALL
+    cameras (unfiltered) — monitor.py filters fall_detection_enabled itself.
+    """
+    import db as _db
+    rec_s = int(config.get("teldrive_record_seconds", 10))
+    rec_c = int(config.get("teldrive_record_cooldown", 300))
+    out: list[dict[str, Any]] = []
+    for r in _db.cameras_for_config():
+        mode = str(r.get("live_mode") or "auto").strip()
+        cam = {
+            "id": r.get("id"),
+            "cam_uid": r.get("cam_uid"),
+            "enabled": _bool_default_true(r.get("enabled")),
+            "name": str(r.get("name", "")).strip() or f"Camera {r.get('id')}",
+            "rtsp_url": str(r.get("rtsp_url") or "").strip(),
+            "go2rtc_src": str(r.get("go2rtc_src") or "").strip(),
+            "mjpeg_url": str(r.get("mjpeg_url") or "").strip(),
+            "live_url": str(r.get("live_url") or "").strip(),
+            "live_mode": mode if mode in {"auto", "iframe", "snapshot"} else "auto",
+            "prompt_id": str(r.get("prompt_id") or "").strip(),
+            "vendor": str(r.get("vendor") or "").strip(),
+            "model": str(r.get("model") or "").strip(),
+            "location": str(r.get("location") or "").strip(),
+            "local_save_images": _bool_default_true(r.get("local_save_images")),
+            "local_save_videos": _bool_default_true(r.get("local_save_videos")),
+            "teldrive_upload_images": _bool_default_true(r.get("teldrive_upload_images")),
+            "teldrive_record_enabled": _bool_default_false(r.get("teldrive_record_enabled")),
+            "record_seconds": positive_int(r["record_seconds"], "record_seconds") if r.get("record_seconds") else rec_s,
+            "record_cooldown": positive_int(r["record_cooldown"], "record_cooldown") if r.get("record_cooldown") else rec_c,
+        }
+        for k in _MODULE_FLAG_KEYS:
+            cam[k] = _bool_default_false(r.get(k))
+        out.append(cam)
+    return out
+
+
+def migrate_cameras_to_table() -> None:
+    """One-time: push legacy settings-JSON `cameras` into the unified table.
+
+    Greenfield (no settings `cameras` key) → no-op. Each migrated camera gets
+    fall_detection_enabled=true (it was a YOLO camera). Matched by name:
+    existing row → update config cols + flag; else insert. Idempotent: the
+    settings key is deleted afterwards so re-boot does nothing.
+    """
+    import db as _db
+    raw = _db.get_setting("cameras", "")
+    if not str(raw).strip():
+        return
+    try:
+        legacy = normalize_cameras({"cameras": raw})
+    except Exception as exc:
+        logger.warning("[CONFIG] cameras migration parse failed: %s", exc)
+        _db.delete_setting("cameras")
+        return
+    existing = {str(r.get("name", "")).strip(): r for r in _db.cameras_for_config()}
+    migrated = 0
+    for cam in legacy:
+        fields = {k: cam[k] for k in (
+            "name", "rtsp_url", "go2rtc_src", "live_url", "live_mode", "prompt_id",
+            "local_save_images", "local_save_videos", "teldrive_upload_images",
+            "teldrive_record_enabled", "record_seconds", "record_cooldown",
+            "enabled") if k in cam}
+        fields["fall_detection_enabled"] = True
+        name = fields.get("name", "").strip()
+        if name in existing:
+            _db.update_camera(int(existing[name]["id"]), fields)
+        else:
+            _db.insert_camera(fields)
+        migrated += 1
+    _db.delete_setting("cameras")
+    logger.info("[CONFIG] Migrated %d cameras from settings-JSON to cameras table", migrated)
+
+
 def normalize_prompts(config: dict[str, Any]) -> list[dict[str, Any]]:
     raw = config.get("prompts", [])
     if not isinstance(raw, list):
@@ -349,8 +432,8 @@ def read_config() -> dict[str, Any]:
     # Env overrides (highest priority)
     config.update(_env_overrides())
 
-    # Normalize
-    config["cameras"] = normalize_cameras(config)
+    # Normalize. Cameras come from the unified Postgres table, NOT settings-JSON.
+    config["cameras"] = cameras_from_table(config)
     config["prompts"] = normalize_prompts(config)
     config["detection_mode"] = "yolo"
     return config
@@ -381,9 +464,10 @@ def write_config(new_config: dict[str, Any]) -> dict[str, Any]:
     except (TypeError, ValueError):
         clean["redis_db"] = 0
     clean["loop_sleep"] = max(0.0, float(clean["loop_sleep"]))
-    clean["cameras"] = normalize_cameras(clean)
     clean["prompts"] = normalize_prompts(clean)
     clean["detection_mode"] = "yolo"
+    # Cameras live in the Postgres `cameras` table now — never persist to settings-JSON.
+    clean.pop("cameras", None)
 
     # Don't overwrite keys that are currently supplied by env (avoid empty overwrite)
     env_vals = _env_overrides()

@@ -22,6 +22,12 @@ services:
         required: false
     environment:
       DATABASE_URL: postgresql://dcnet:${DB_PASSWORD:-dcnet_dev}@postgres:5432/dcnet
+      # Live view: browser iframes go2rtc stream.html. Dev publishes go2rtc on
+      # localhost:1984 (prod fronts it via Caddy). Must be browser-reachable.
+      GO2RTC_URL: ${GO2RTC_URL:-http://localhost:1984}
+      # Backend frame/clip fetch reaches go2rtc via the docker service name
+      # (localhost:1984 inside the container is the app itself, not go2rtc).
+      GO2RTC_INTERNAL_URL: ${GO2RTC_INTERNAL_URL:-http://go2rtc:1984}
     volumes:
       - fdw_data:/app/data
     ports:
@@ -29,6 +35,18 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    restart: unless-stopped
+
+  go2rtc:
+    image: alexxit/go2rtc:latest
+    env_file:
+      - path: ./.env
+        required: false
+    volumes:
+      - ./go2rtc.yaml:/config/go2rtc.yaml:ro
+      - go2rtc_data:/config
+    ports:
+      - "1984:1984"   # browser reaches stream.html here (dev only)
     restart: unless-stopped
 
   event_collector:
@@ -76,3 +94,4 @@ services:
 volumes:
   pgdata:
   fdw_data:
+  go2rtc_data:
