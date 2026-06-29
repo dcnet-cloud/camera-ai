@@ -45,3 +45,43 @@ def summarize(crossings: list[dict]) -> dict:
     ins = sum(1 for c in crossings if c["direction"] == "in")
     outs = sum(1 for c in crossings if c["direction"] == "out")
     return {"in": ins, "out": outs, "occupancy": ins - outs}
+
+
+# ── Dual-counting test helpers (block compute + YOLO line-crossing) ──
+
+def block_from_counts(raw_in: int, raw_out: int, baseline: int = 0) -> dict:
+    """Số hiển thị 1 block: baseline cộng vào IN, OUT giữ nguyên, occupancy clamp."""
+    ins = int(baseline) + int(raw_in)
+    outs = int(raw_out)
+    return {"in": ins, "out": outs, "occupancy": max(0, ins - outs)}
+
+
+def side_of(cy: float, y_line: float, band: float) -> str | None:
+    """Phía của tâm so với vạch, với dead-band ±band. None = đang trong band."""
+    if cy < y_line - band:
+        return "above"
+    if cy > y_line + band:
+        return "below"
+    return None
+
+
+def resolve_side(prev: str | None, cy: float, y_line: float, band: float) -> str | None:
+    s = side_of(cy, y_line, band)
+    return s if s is not None else prev
+
+
+def crossing_direction(prev_side: str | None, new_side: str | None,
+                       invert: bool = False) -> str | None:
+    """above→below = 'in' (đảo nếu invert). None nếu chưa đổi side rõ ràng."""
+    if prev_side is None or new_side is None or prev_side == new_side:
+        return None
+    direction = "in" if (prev_side == "above" and new_side == "below") else "out"
+    if invert:
+        direction = "out" if direction == "in" else "in"
+    return direction
+
+
+def in_x_range(cx: float, frame_w: float, x_start_pct: float, x_end_pct: float) -> bool:
+    x0 = x_start_pct / 100.0 * frame_w
+    x1 = x_end_pct / 100.0 * frame_w
+    return x0 <= cx <= x1
