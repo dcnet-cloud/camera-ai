@@ -5,6 +5,7 @@ torch==2.5.1
 torchvision==0.20.1
 opencv-python-headless==4.10.0.84
 ultralytics==8.3.59
+lap==0.5.13
 python-multipart
 bcrypt
 python-jose[cryptography]
