@@ -25,6 +25,9 @@ services:
       DATABASE_URL: postgresql://dcnet:${DB_PASSWORD}@postgres:5432/dcnet
       SECRET_KEY: ${SECRET_KEY}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      # Backend fetches go2rtc frames via the docker service name. Browser live
+      # iframe uses go2rtc_url (set in /settings to the Caddy /live path).
+      GO2RTC_INTERNAL_URL: ${GO2RTC_INTERNAL_URL:-http://go2rtc:1984}
     volumes:
       - fdw_data:/app/data
     depends_on:
