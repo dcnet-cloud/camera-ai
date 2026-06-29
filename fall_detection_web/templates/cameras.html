@@ -277,6 +277,16 @@
     .badge.good { color: #bbf7d0; border-color: rgba(34, 197, 94, .44); background: rgba(34, 197, 94, .10); }
     .badge.bad { color: #fecdd3; border-color: rgba(244, 63, 94, .44); background: rgba(244, 63, 94, .10); }
     .status { position: absolute; top: 13px; right: 54px; }
+    .modules { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+    .mod-pill {
+      font-size: 11px; font-weight: 600; letter-spacing: .02em; cursor: pointer;
+      padding: 4px 9px; border-radius: 999px; border: 1px solid rgba(148,163,184,.30);
+      background: rgba(148,163,184,.08); color: var(--muted, #94a3b8);
+      transition: background .15s, color .15s, border-color .15s; user-select: none;
+    }
+    .mod-pill:hover { border-color: rgba(148,163,184,.55); }
+    .mod-pill.on { color: #bbf7d0; border-color: rgba(34,197,94,.5); background: rgba(34,197,94,.14); }
+    .mod-pill[aria-busy="true"] { opacity: .5; pointer-events: none; }
     .empty-panel {
       min-height: 180px;
       border: 1px dashed var(--line-strong);
@@ -544,6 +554,18 @@
       }
       return src;
     }
+    const MODULES = [
+      { key: "counting_enabled", label: "Đếm" },
+      { key: "fall_detection_enabled", label: "Ngã (YOLO)" },
+      { key: "reid_enabled", label: "Re-ID" },
+      { key: "live_enabled", label: "Live" },
+    ];
+    function modulePills(camera, index) {
+      return MODULES.map(m => {
+        const on = camera[m.key] === true;
+        return `<span class="mod-pill ${on ? "on" : ""}" role="switch" aria-checked="${on}" data-module="${m.key}" data-index="${index}" title="${on ? "Tắt" : "Bật"} ${esc(m.label)}">${esc(m.label)}</span>`;
+      }).join("");
+    }
     function promptTitle(id) {
       const prompt = state.prompts.find(item => item.id === id);
       return prompt ? prompt.title || "Untitled prompt" : "Default prompt";
@@ -594,7 +616,7 @@
       $("cameraCount").textContent = `${state.cameras.length} camera${state.cameras.length === 1 ? "" : "s"}`;
       const grid = $("cameraGrid");
       if (!state.cameras.length) {
-        grid.innerHTML = '<div class="empty-panel">Chưa có camera fall-detection (YOLO). Nhấn <b>Add camera</b> để thêm.<br><span style="opacity:.7">Camera đếm người ra/vào (ACAP edge) được quản ở trang <a href="/modules" style="color:var(--info,#38bdf8)">Module camera</a>.</span></div>';
+        grid.innerHTML = '<div class="empty-panel">Chưa có camera. Nhấn <b>Add camera</b> để thêm.<br><span style="opacity:.7">Mỗi camera bật/tắt module: Đếm người, Phát hiện ngã (YOLO), Re-ID, Live.</span></div>';
         return;
       }
       grid.innerHTML = state.cameras.map((camera, index) => {
@@ -617,6 +639,7 @@
                 <span class="badge">Prompt: ${esc(promptTitle(camera.prompt_id))}</span>
                 <span class="badge ${camera.teldrive_record_enabled ? "good" : ""}">Record: ${camera.teldrive_record_enabled ? "On" : "Off"}</span>
               </div>
+              <div class="modules">${modulePills(camera, index)}</div>
               <div class="actions">
                 <a class="btn small" href="/camera/${encodeURIComponent(name)}">Open detail</a>
                 <button class="btn small" data-toggle="${index}" type="button">${camera.enabled ? "Disable" : "Enable"}</button>
@@ -717,7 +740,10 @@
       const camera = index >= 0 ? state.cameras[index] : {
         enabled: true, name: "", rtsp_url: "", go2rtc_src: "", live_url: "", live_mode: "auto", prompt_id: "",
         local_save_images: true, local_save_videos: true, teldrive_upload_images: true, teldrive_record_enabled: false,
-        record_seconds: 10, record_cooldown: 300
+        record_seconds: 10, record_cooldown: 300,
+        // New cameras default to the fall-detection (YOLO) module on, matching
+        // the prior "Add camera" behaviour. Other modules toggled via the pills.
+        fall_detection_enabled: true, counting_enabled: false, reid_enabled: false, live_enabled: false
       };
       $("dialogTitle").textContent = index >= 0 ? "Edit camera" : "Add camera";
       $("camEnabled").checked = camera.enabled !== false;
@@ -804,6 +830,26 @@
           showToast(err.message || "Failed to update camera status", "err");
         }
       }
+      const mod = event.target.closest("[data-module]");
+      if (mod) {
+        const index = Number(mod.dataset.index);
+        const key = mod.dataset.module;
+        const prev = state.cameras[index][key] === true;
+        state.cameras[index][key] = !prev;
+        mod.setAttribute("aria-busy", "true");
+        try {
+          await saveCameras(index);
+          const on = state.cameras[index][key] === true;
+          mod.classList.toggle("on", on);
+          mod.setAttribute("aria-checked", String(on));
+        } catch (err) {
+          state.cameras[index][key] = prev;
+          showToast(err.message || "Không cập nhật được module", "err");
+        } finally {
+          mod.removeAttribute("aria-busy");
+        }
+        return;
+      }
       const del = event.target.closest("[data-delete]");
       if (del && confirm("Delete this camera?")) {
         state.cameras.splice(Number(del.dataset.delete), 1);
@@ -827,7 +873,10 @@
         return;
       }
       const editIndex = state.editing;
-      if (editIndex >= 0) state.cameras[editIndex] = camera;
+      // Preserve id + module flags (dialog only edits config fields). Without
+      // the id the backend would treat this as a new insert (dup) and delete
+      // the original row.
+      if (editIndex >= 0) state.cameras[editIndex] = { ...state.cameras[editIndex], ...camera };
       else state.cameras.push(camera);
       $("cameraDialog").close();
       await saveCameras(editIndex);

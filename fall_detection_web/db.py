@@ -212,6 +212,22 @@ def init_db() -> None:
                      "ON cameras (fall_detection_enabled) WHERE enabled = true")
         conn.execute("CREATE INDEX IF NOT EXISTS cameras_counting "
                      "ON cameras (counting_enabled) WHERE enabled = true")
+        # ── Unified registry: config columns formerly in settings-JSON cameras ──
+        # (fall_detection pipeline / monitor.py reads these off each camera row)
+        _CAMERA_CONFIG_COLS = (
+            ("go2rtc_src", "TEXT NOT NULL DEFAULT ''"),
+            ("live_url", "TEXT NOT NULL DEFAULT ''"),
+            ("live_mode", "TEXT NOT NULL DEFAULT 'auto'"),
+            ("prompt_id", "TEXT NOT NULL DEFAULT ''"),
+            ("local_save_images", "BOOLEAN NOT NULL DEFAULT true"),
+            ("local_save_videos", "BOOLEAN NOT NULL DEFAULT true"),
+            ("teldrive_upload_images", "BOOLEAN NOT NULL DEFAULT true"),
+            ("teldrive_record_enabled", "BOOLEAN NOT NULL DEFAULT false"),
+            ("record_seconds", "INTEGER"),
+            ("record_cooldown", "INTEGER"),
+        )
+        for col, ddl in _CAMERA_CONFIG_COLS:
+            conn.execute(f"ALTER TABLE cameras ADD COLUMN IF NOT EXISTS {col} {ddl}")
         # Seed: cam Axis = đếm + live (idempotent, SET true an toàn re-run)
         conn.execute("UPDATE cameras SET counting_enabled=true, live_enabled=true "
                      "WHERE cam_uid='B8A44F4627CE'")
@@ -802,3 +818,91 @@ def update_camera_modules(cam_id: int, modules: dict[str, bool]) -> None:
     params.append(cam_id)
     with get_conn() as conn:
         conn.execute(f"UPDATE cameras SET {', '.join(sets)} WHERE id = %s", tuple(params))
+
+
+# ── Unified camera registry CRUD (replaces settings-JSON cameras) ──
+
+# Columns the unified /cameras UI may write. Whitelist = SQL-injection guard.
+_CAMERA_EDITABLE = (
+    "name", "rtsp_url", "go2rtc_src", "mjpeg_url", "live_url", "live_mode",
+    "prompt_id", "vendor", "model", "location", "enabled",
+    "local_save_images", "local_save_videos", "teldrive_upload_images",
+    "teldrive_record_enabled", "record_seconds", "record_cooldown",
+    "counting_enabled", "fall_detection_enabled", "reid_enabled", "live_enabled",
+)
+
+
+def _slugify(text: str) -> str:
+    import re
+    s = re.sub(r"[^a-z0-9]+", "-", str(text).strip().lower()).strip("-")
+    return s[:24] or "cam"
+
+
+def gen_cam_uid(name: str) -> str:
+    """Synthetic cam_uid for manually-added (non-edge) cameras."""
+    import uuid
+    return f"manual-{_slugify(name)}-{uuid.uuid4().hex[:6]}"
+
+
+def cameras_for_config() -> list[dict[str, Any]]:
+    """All cameras as dicts (id, cam_uid, config cols, module flags).
+
+    config.read_config() finalizes these into monitor's camera dict shape.
+    NOT filtered by any flag — the unified UI and snapshot/live routes need
+    every camera; the monitor selector filters fall_detection_enabled itself.
+    """
+    with get_conn() as conn:
+        rows = conn.execute("SELECT * FROM cameras ORDER BY id").fetchall()
+    return [dict(r) for r in rows]
+
+
+def insert_camera(fields: dict[str, Any]) -> int:
+    cols = {k: v for k, v in fields.items() if k in _CAMERA_EDITABLE}
+    cols.setdefault("rtsp_url", "")          # NOT NULL — go2rtc-only cams have no rtsp
+    name = str(cols.get("name") or "Camera").strip() or "Camera"
+    cols["name"] = name
+    cam_uid = str(fields.get("cam_uid") or "").strip() or gen_cam_uid(name)
+    colnames = ["cam_uid"] + list(cols.keys())
+    placeholders = ", ".join(["%s"] * len(colnames))
+    params = [cam_uid] + list(cols.values())
+    with get_conn() as conn:
+        row = conn.execute(
+            f"INSERT INTO cameras ({', '.join(colnames)}) VALUES ({placeholders}) "
+            "RETURNING id", tuple(params)
+        ).fetchone()
+    return int(row["id"])
+
+
+def update_camera(cam_id: int, fields: dict[str, Any]) -> None:
+    sets, params = [], []
+    for k, v in fields.items():
+        if k in _CAMERA_EDITABLE:
+            sets.append(f"{k} = %s")
+            params.append(v)
+    if not sets:
+        return
+    params.append(cam_id)
+    with get_conn() as conn:
+        conn.execute(f"UPDATE cameras SET {', '.join(sets)} WHERE id = %s", tuple(params))
+
+
+def camera_has_history(cam_id: int) -> bool:
+    """True if FK rows (events/appearance) reference this camera — block hard delete."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT (EXISTS(SELECT 1 FROM events WHERE cam_id=%s) "
+            "OR EXISTS(SELECT 1 FROM appearance WHERE cam_id=%s)) AS h",
+            (cam_id, cam_id),
+        ).fetchone()
+    return bool(row["h"])
+
+
+def delete_camera(cam_id: int) -> str:
+    """Hard-delete if no FK history, else soft-disable. Returns 'deleted'|'disabled'."""
+    if camera_has_history(cam_id):
+        with get_conn() as conn:
+            conn.execute("UPDATE cameras SET enabled = false WHERE id = %s", (cam_id,))
+        return "disabled"
+    with get_conn() as conn:
+        conn.execute("DELETE FROM cameras WHERE id = %s", (cam_id,))
+    return "deleted"

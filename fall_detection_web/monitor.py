@@ -956,7 +956,13 @@ def capture_latest_frames(index: int, config: dict[str, Any], camera: dict[str, 
 
 
 def _enabled_monitor_cameras(config: dict[str, Any]) -> list[dict[str, Any]]:
-    all_cameras = [camera for camera in normalize_cameras(config) if camera.get("enabled")]
+    # Unified registry: a camera runs the YOLO pipeline only when its master
+    # `enabled` AND its `fall_detection_enabled` module flag are both on.
+    cameras = config.get("cameras") or normalize_cameras(config)
+    all_cameras = [
+        camera for camera in cameras
+        if camera.get("enabled") and camera.get("fall_detection_enabled")
+    ]
     return [
         camera
         for camera in all_cameras
