@@ -765,6 +765,8 @@ def insert_counting_event(cam_id: int, direction: str, ts: datetime,
                           source: str = "yolo", track_id: str | None = None,
                           snapshot_path: str | None = None) -> None:
     """Ghi 1 crossing vào bảng events (dùng cho YOLO; source='axis' nếu cần)."""
+    if random.random() < 0.02:
+        cleanup_counting_snaps()
     etype = _SOURCE_TYPE.get(source, "counter_yolo")
     axis_obj = f"yolo-{track_id}" if track_id is not None else None
     with get_conn() as conn:
