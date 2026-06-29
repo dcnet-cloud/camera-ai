@@ -26,6 +26,7 @@ ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data"
 EVENT_IMAGES_DIR = DATA_DIR / "event_images"
 REID_CROPS_DIR = DATA_DIR / "reid_crops"
+COUNTING_SNAPS_DIR = DATA_DIR / "counting_snaps"
 
 LOCAL_TZ = timezone(timedelta(hours=7))
 MAX_EVENTS = 5000
@@ -67,6 +68,7 @@ def _get_pool() -> ConnectionPool:
 def ensure_data_dir() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     EVENT_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+    COUNTING_SNAPS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 @contextmanager
@@ -760,17 +762,47 @@ _VN_TODAY = ("(e.ts AT TIME ZONE 'Asia/Ho_Chi_Minh')::date "
 
 
 def insert_counting_event(cam_id: int, direction: str, ts: datetime,
-                          source: str = "yolo", track_id: str | None = None) -> None:
+                          source: str = "yolo", track_id: str | None = None,
+                          snapshot_path: str | None = None) -> None:
     """Ghi 1 crossing vào bảng events (dùng cho YOLO; source='axis' nếu cần)."""
     etype = _SOURCE_TYPE.get(source, "counter_yolo")
     axis_obj = f"yolo-{track_id}" if track_id is not None else None
     with get_conn() as conn:
         conn.execute(
-            "INSERT INTO events (cam_id, ts, type, direction, axis_object_id, payload) "
-            "VALUES (%s, %s, %s, %s, %s, %s)",
+            "INSERT INTO events (cam_id, ts, type, direction, axis_object_id, payload, snapshot_path) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s)",
             (cam_id, ts, etype, direction, axis_obj,
-             Json({"source": source, "track_id": track_id})),
+             Json({"source": source, "track_id": track_id}),
+             snapshot_path),
         )
+
+
+def counting_log_today(cam_id: int, limit: int = 50) -> list[dict[str, Any]]:
+    sql = ("SELECT type, direction, ts, snapshot_path FROM events "
+           f"WHERE cam_id=%s AND type IN ('counter','counter_yolo') AND "
+           "(ts AT TIME ZONE 'Asia/Ho_Chi_Minh')::date=(now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date "
+           "ORDER BY ts DESC LIMIT %s")
+    with get_conn() as conn:
+        rows = conn.execute(sql, (cam_id, limit)).fetchall()
+    out = []
+    for r in rows:
+        snap = Path(r["snapshot_path"]).name if r["snapshot_path"] else None
+        out.append({"source": "yolo" if r["type"] == "counter_yolo" else "axis",
+                    "direction": r["direction"],
+                    "time": r["ts"].astimezone(LOCAL_TZ).strftime("%H:%M:%S"),
+                    "snap": snap})
+    return out
+
+
+def cleanup_counting_snaps(max_age_seconds: int = 2 * 86400) -> None:
+    ensure_data_dir()
+    cutoff = time.time() - max_age_seconds
+    for p in COUNTING_SNAPS_DIR.glob("*.jpg"):
+        try:
+            if p.stat().st_mtime < cutoff:
+                p.unlink()
+        except OSError:
+            continue
 
 
 def counting_block(cam_id: int, source: str, since_ts: datetime | None = None,

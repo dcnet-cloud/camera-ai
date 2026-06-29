@@ -1326,9 +1326,20 @@ def _counting_loop(camera: dict[str, Any], line_cfg: dict[str, Any]) -> None:
                     new_side = _counting.resolve_side(prev, cy, y_line, band)
                     direction = _counting.crossing_direction(prev, new_side, invert)
                     if direction:
+                        snap_path = None
+                        try:
+                            db.COUNTING_SNAPS_DIR.mkdir(parents=True, exist_ok=True)
+                            now_utc = datetime.now(timezone.utc)
+                            fname = f"{now_utc.strftime('%Y%m%dT%H%M%S%f')}_yolo_{direction}.jpg"
+                            p = db.COUNTING_SNAPS_DIR / fname
+                            cv2.imwrite(str(p), frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                            snap_path = str(p)
+                        except Exception:
+                            pass
                         db.insert_counting_event(
                             cam_id, direction,
-                            datetime.now(timezone.utc), "yolo", track_id=str(tid))
+                            datetime.now(timezone.utc), "yolo", track_id=str(tid),
+                            snapshot_path=snap_path)
                         logger.info("[COUNT] camera=%s track=%s -> %s", cam_name, tid, direction)
                     if new_side is not None:
                         track_sides[tid] = new_side

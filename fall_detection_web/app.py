@@ -208,6 +208,8 @@ def _counting_blocks(cam_id: int) -> dict[str, Any]:
         "camera": db.counting_block(cam_id, "axis", since_ts, baseline_in),
         "yolo": db.counting_block(cam_id, "yolo", since_ts, baseline_in),
         "reset_ts": reset_ts_iso,
+        "log": [{**x, "snap_url": (f"/api/counting-snap/{x['snap']}" if x["snap"] else None)}
+                for x in db.counting_log_today(cam_id)],
     }
 
 
@@ -228,6 +230,18 @@ def api_counting_reset(camera_name: str, payload: dict[str, Any] = Body(...),
     from datetime import datetime, timezone
     db.set_counting_baseline(cam_id, datetime.now(timezone.utc), occupancy)
     return _counting_blocks(cam_id)
+
+
+@app.get("/api/counting-snap/{filename}")
+def counting_snap(filename: str, _: str = Depends(auth.require_auth)):
+    safe = Path(filename).name
+    if safe != filename or not safe.lower().endswith(".jpg"):
+        raise HTTPException(status_code=404, detail="Not found")
+    path = db.COUNTING_SNAPS_DIR / safe
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail="Not found")
+    return FileResponse(path, media_type="image/jpeg",
+                        headers={"Cache-Control": "private, max-age=86400, immutable"})
 
 
 @app.post("/api/counting/yolo-config/{camera_name:path}")

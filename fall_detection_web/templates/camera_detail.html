@@ -225,6 +225,11 @@
     .count-cfg input[type=number] { width: 72px; }
     .count-reset { grid-column: span 2; display: flex; align-items: center; gap: 8px; margin-top: 4px; }
     .count-reset .k { font-size: 12px; color: var(--muted); flex: 1; }
+    .count-log { grid-column: span 2; display:flex; flex-direction:column; gap:6px; max-height:320px; overflow-y:auto; }
+    .count-log .row { display:flex; align-items:center; gap:10px; font-size:13px; padding:4px 0; border-bottom:1px solid var(--border); }
+    .count-log img { width:64px; height:40px; object-fit:cover; border-radius:4px; cursor:pointer; }
+    .count-log .src-axis { color:#378ADD; } .count-log .src-yolo { color:#EF9F27; }
+    .count-log .dir-in { color: var(--good,#3fb950); } .count-log .dir-out { color: var(--bad,#f85149); }
 
     .toolbar { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
     select, input {
@@ -773,7 +778,8 @@
           <span class="k">Reset cả 2 block về số người đang trong phòng:</span>
           <input type="number" id="resetOcc" min="0" value="0" style="width:72px">
           <button class="btn" onclick="resetCounting()">Đặt lại hôm nay</button>
-        </div>`;
+        </div>
+        <div class="count-log full-width" id="countLog"></div>`;
       $("cameraMetrics").querySelectorAll("[data-icon]").forEach(el => { el.innerHTML = icons[el.dataset.icon] || ""; });
     }
     async function loadCamera() {
@@ -801,6 +807,12 @@
         const d = await api(`/api/counting/camera/${encodeURIComponent(routeCameraName)}`);
         setCountVal("camIn", d.camera.in);  setCountVal("camOut", d.camera.out);  setCountVal("camOcc", d.camera.occupancy);
         setCountVal("yoloIn", d.yolo.in);   setCountVal("yoloOut", d.yolo.out);   setCountVal("yoloOcc", d.yolo.occupancy);
+        const log = (d.log || []).map(e => `<div class="row">
+          <span style="width:64px">${e.snap_url ? `<img src="${e.snap_url}" onclick="window.open('${e.snap_url}')">` : "—"}</span>
+          <span class="src-${e.source}" style="width:120px">${e.source === "yolo" ? "🤖 YOLO" : "📷 Camera"}</span>
+          <span class="dir-${e.direction}" style="width:60px">${e.direction === "in" ? "VÀO" : "RA"}</span>
+          <span style="color:var(--muted)">${e.time}</span></div>`).join("");
+        const el = document.getElementById("countLog"); if (el) el.innerHTML = log || `<div style="color:var(--muted);font-size:12px">Chưa có lượt nào hôm nay.</div>`;
         // nạp cấu hình vạch hiện tại từ camera (chỉ khi form chưa mở để khỏi đè khi đang sửa)
         const cfg = (state.camera && state.camera.yolo_counting) || {};
         const det = document.querySelector(".count-cfg");
