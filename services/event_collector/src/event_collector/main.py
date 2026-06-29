@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS cameras (
     vendor      TEXT DEFAULT 'axis',
     model       TEXT,
     location    TEXT,
+    go2rtc_src  TEXT,
     enabled     BOOLEAN DEFAULT true,
     created_at  TIMESTAMPTZ DEFAULT now()
 );
@@ -74,6 +75,7 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS events_cam_ts ON events (cam_id, ts DESC);
 CREATE INDEX IF NOT EXISTS events_type_ts ON events (type, ts DESC);
+ALTER TABLE cameras ADD COLUMN IF NOT EXISTS go2rtc_src TEXT;
 """
 
 
