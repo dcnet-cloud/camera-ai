@@ -209,6 +209,23 @@
     .metric-card-label { color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; display: flex; align-items: center; gap: 6px; }
     .metric-card-value { font-family: "Fira Code", monospace; font-size: 13px; color: var(--text); word-break: break-all; margin-top: 2px; }
 
+    .count-block { grid-column: span 2; border-radius: 8px; padding: 12px 14px; border-left: 4px solid; }
+    .count-block.cam  { background: rgba(55,138,221,0.12);  border-left-color: #378ADD; }
+    .count-block.yolo { background: rgba(239,159,39,0.12);  border-left-color: #EF9F27; }
+    .count-block h4 { margin: 0 0 8px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; display: flex; align-items: center; gap: 6px; }
+    .count-block.cam h4  { color: #378ADD; }
+    .count-block.yolo h4 { color: #EF9F27; }
+    .count-stats { display: flex; gap: 18px; }
+    .count-stats .n { font-family: "Fira Code", monospace; font-size: 24px; font-weight: 700; color: var(--text); }
+    .count-stats .k { font-size: 11px; color: var(--muted); text-transform: uppercase; }
+    .count-cfg { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px; }
+    .count-cfg summary { cursor: pointer; font-size: 12px; color: var(--muted); }
+    .count-cfg .row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+    .count-cfg label { font-size: 12px; color: var(--muted); width: 130px; }
+    .count-cfg input[type=number] { width: 72px; }
+    .count-reset { grid-column: span 2; display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+    .count-reset .k { font-size: 12px; color: var(--muted); flex: 1; }
+
     .toolbar { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
     select, input {
       min-height: 40px;
@@ -725,6 +742,37 @@
         <div class="metric-card full-width">
           <div class="metric-card-label"><span data-icon="link-icon"></span>go2rtc Source</div>
           <div class="metric-card-value truncate" title="${esc(camera.go2rtc_src || "-")}">${esc(camera.go2rtc_src || "-")}</div>
+        </div>
+        <div class="count-block cam">
+          <h4><span data-icon="link-icon"></span>Camera (Axis) · hôm nay</h4>
+          <div class="count-stats">
+            <div><div class="n" id="camIn">–</div><div class="k">Vào</div></div>
+            <div><div class="n" id="camOut">–</div><div class="k">Ra</div></div>
+            <div><div class="n" id="camOcc">–</div><div class="k">Trong phòng</div></div>
+          </div>
+        </div>
+        <div class="count-block yolo">
+          <h4><span data-icon="monitor"></span>YOLO (máy local) · hôm nay</h4>
+          <div class="count-stats">
+            <div><div class="n" id="yoloIn">–</div><div class="k">Vào</div></div>
+            <div><div class="n" id="yoloOut">–</div><div class="k">Ra</div></div>
+            <div><div class="n" id="yoloOcc">–</div><div class="k">Trong phòng</div></div>
+          </div>
+          <details class="count-cfg">
+            <summary>⚙ Cấu hình vạch đếm YOLO</summary>
+            <div class="row"><label>Bật đếm YOLO</label><input type="checkbox" id="cfgEnabled"></div>
+            <div class="row"><label>Vạch ngang Y (%)</label><input type="number" id="cfgLineY" min="0" max="100" value="51"></div>
+            <div class="row"><label>Đoạn X bắt đầu (%)</label><input type="number" id="cfgXStart" min="0" max="100" value="44"></div>
+            <div class="row"><label>Đoạn X kết thúc (%)</label><input type="number" id="cfgXEnd" min="0" max="100" value="71"></div>
+            <div class="row"><label>Dịch chuyển tối thiểu (%)</label><input type="number" id="cfgMinDisp" min="0" max="30" value="6"></div>
+            <div class="row"><label>Đảo chiều (xuống=Ra)</label><input type="checkbox" id="cfgInvert"></div>
+            <div class="row"><button class="btn" onclick="saveYoloConfig()">Lưu vạch</button></div>
+          </details>
+        </div>
+        <div class="count-reset">
+          <span class="k">Reset cả 2 block về số người đang trong phòng:</span>
+          <input type="number" id="resetOcc" min="0" value="0" style="width:72px">
+          <button class="btn" onclick="resetCounting()">Đặt lại hôm nay</button>
         </div>`;
       $("cameraMetrics").querySelectorAll("[data-icon]").forEach(el => { el.innerHTML = icons[el.dataset.icon] || ""; });
     }
@@ -744,7 +792,56 @@
       $("monitorStatus").textContent = running ? "Running" : "Stopped";
       $("runDot").className = `dot ${running ? "running" : "bad"}`;
       renderLive();
+      loadCounting(); startCountingPoll();
       updateToggleBtn();
+    }
+    function setCountVal(id, v) { const el = $(id); if (el) el.textContent = (v ?? "–"); }
+    async function loadCounting() {
+      try {
+        const d = await api(`/api/counting/camera/${encodeURIComponent(routeCameraName)}`);
+        setCountVal("camIn", d.camera.in);  setCountVal("camOut", d.camera.out);  setCountVal("camOcc", d.camera.occupancy);
+        setCountVal("yoloIn", d.yolo.in);   setCountVal("yoloOut", d.yolo.out);   setCountVal("yoloOcc", d.yolo.occupancy);
+        // nạp cấu hình vạch hiện tại từ camera (chỉ khi form chưa mở để khỏi đè khi đang sửa)
+        const cfg = (state.camera && state.camera.yolo_counting) || {};
+        const det = document.querySelector(".count-cfg");
+        if (det && !det.open) {
+          if ($("cfgEnabled")) $("cfgEnabled").checked = !!cfg.enabled;
+          if (cfg.line_y != null && $("cfgLineY")) $("cfgLineY").value = cfg.line_y;
+          if (cfg.x_start != null && $("cfgXStart")) $("cfgXStart").value = cfg.x_start;
+          if (cfg.x_end != null && $("cfgXEnd")) $("cfgXEnd").value = cfg.x_end;
+          if (cfg.min_disp != null && $("cfgMinDisp")) $("cfgMinDisp").value = cfg.min_disp;
+          if ($("cfgInvert")) $("cfgInvert").checked = !!cfg.invert;
+        }
+      } catch (e) { /* fail-open: giữ "–" */ }
+    }
+    function startCountingPoll() {
+      if (state.countTimer) clearInterval(state.countTimer);
+      state.countTimer = setInterval(loadCounting, 3000);
+    }
+    async function resetCounting() {
+      const occupancy = parseInt($("resetOcc").value || "0", 10) || 0;
+      try {
+        await api(`/api/counting/reset/${encodeURIComponent(routeCameraName)}`,
+          { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ occupancy }) });
+        showToast("Đã đặt lại số đếm hôm nay", "ok");
+        await loadCounting();
+      } catch (e) { showToast(e.message || "Lỗi reset", "bad"); }
+    }
+    async function saveYoloConfig() {
+      const cfg = {
+        enabled: $("cfgEnabled").checked,
+        line_y: parseFloat($("cfgLineY").value),
+        x_start: parseFloat($("cfgXStart").value),
+        x_end: parseFloat($("cfgXEnd").value),
+        min_disp: parseFloat($("cfgMinDisp").value),
+        invert: $("cfgInvert").checked,
+      };
+      try {
+        await api(`/api/counting/yolo-config/${encodeURIComponent(routeCameraName)}`,
+          { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cfg) });
+        showToast("Đã lưu vạch đếm YOLO", "ok");
+        if (state.camera) state.camera.yolo_counting = cfg;
+      } catch (e) { showToast(e.message || "Lỗi lưu cấu hình", "bad"); }
     }
     async function loadStatus() {
       const data = await api("/api/status");
