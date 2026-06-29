@@ -62,6 +62,10 @@ services:
       MQTT_USER: ${MQTT_USER:-}
       MQTT_PASSWORD: ${MQTT_PASSWORD:-}
       MQTT_CLIENT_ID: ${MQTT_CLIENT_ID:-event_collector_cameraai}
+      GO2RTC_INTERNAL_URL: ${GO2RTC_INTERNAL_URL:-http://go2rtc:1984}
+      COUNTING_SNAPS_DIR: /app/data/counting_snaps
+    volumes:
+      - fdw_data:/app/data
     depends_on:
       postgres:
         condition: service_healthy
