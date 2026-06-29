@@ -104,14 +104,16 @@ def _rtsp_url() -> str:
 
 
 async def _save_axis_snapshot(repo: Repo, cam_id: int, ev_id: int, direction: str) -> None:
-    src = await repo.go2rtc_src_for(cam_id)
-    base = os.environ.get("GO2RTC_INTERNAL_URL", "http://go2rtc:1984")
-    snaps = os.environ.get("COUNTING_SNAPS_DIR", "/app/data/counting_snaps")
-    if not src:
-        return
-    os.makedirs(snaps, exist_ok=True)
-    url = f"{base.rstrip('/')}/api/frame.jpeg?src={src}"
+    # Best-effort tuyệt đối: mọi lỗi (DB, fs, network) chỉ log, KHÔNG được
+    # thoát ra làm gãy vòng MQTT consume.
     try:
+        src = await repo.go2rtc_src_for(cam_id)
+        if not src:
+            return
+        base = os.environ.get("GO2RTC_INTERNAL_URL", "http://go2rtc:1984")
+        snaps = os.environ.get("COUNTING_SNAPS_DIR", "/app/data/counting_snaps")
+        os.makedirs(snaps, exist_ok=True)
+        url = f"{base.rstrip('/')}/api/frame.jpeg?src={src}"
         async with httpx.AsyncClient(timeout=5) as cli:
             r = await cli.get(url)
         if r.status_code == 200 and r.content:
