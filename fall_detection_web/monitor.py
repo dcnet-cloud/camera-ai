@@ -17,7 +17,7 @@ os.environ.setdefault("OPENCV_FFMPEG_LOGLEVEL", "-8")
 os.environ.setdefault("OPENCV_LOG_LEVEL", "ERROR")
 
 from ai import send_telegram, verify_scene
-from config import get_camera, normalize_cameras, require_config
+from config import get_camera, normalize_cameras, read_config, require_config
 import db
 from db import insert_event, now_iso
 import teldrive
@@ -32,6 +32,9 @@ state_lock = threading.Lock()
 stop_event = threading.Event()
 worker_thread: threading.Thread | None = None
 monitor_lock = threading.Lock()
+counting_stop_event = threading.Event()
+counting_threads: list[threading.Thread] = []
+counting_lock = threading.Lock()
 cleanup_lock = threading.Lock()
 cleanup_thread: threading.Thread | None = None
 maintenance_lock = threading.Lock()
@@ -1247,3 +1250,137 @@ def restart_monitor(config: dict[str, Any]) -> None:
         worker_thread = new_thread
         new_thread.start()
         insert_event("config_applied", message="Monitor restarted with new settings")
+
+
+# ── Engine đếm YOLO độc lập (dual-counting test) ──
+
+def _counting_loop(camera: dict[str, Any], line_cfg: dict[str, Any]) -> None:
+    """Mở RTSP full-FPS, model.track(persist=True), line-crossing + dead-band → ghi events(counter_yolo)."""
+    import cv2
+    from ultralytics import YOLO
+    import counting as _counting
+
+    cam_id = int(camera["id"])
+    cam_name = str(camera.get("name") or cam_id)
+    rtsp_url = str(camera.get("rtsp_url") or "")
+    if not rtsp_url:
+        logger.warning("[COUNT] camera=%s không có rtsp_url, bỏ qua đếm YOLO", cam_name)
+        return
+
+    cfg = read_config()
+    model = YOLO(cfg["yolo_model"])
+    imgsz = int(cfg["yolo_imgsz"])
+    conf = float(cfg["confidence"])
+
+    line_y_pct = float(line_cfg.get("line_y", 50))
+    x_start = float(line_cfg.get("x_start", 0))
+    x_end = float(line_cfg.get("x_end", 100))
+    min_disp_pct = float(line_cfg.get("min_disp", 6))
+    invert = bool(line_cfg.get("invert", False))
+
+    track_sides: dict[int, str] = {}
+    cap = cv2.VideoCapture(rtsp_url)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    consecutive_failures = 0
+    last_reconnect_log = 0.0
+    logger.info("[COUNT] start camera=%s line_y=%.0f%% x=[%.0f,%.0f]%% min_disp=%.0f%% invert=%s",
+                cam_name, line_y_pct, x_start, x_end, min_disp_pct, invert)
+    try:
+        while not counting_stop_event.is_set():
+            ok, frame = cap.read()
+            if not ok:
+                consecutive_failures += 1
+                now = time.time()
+                if now - last_reconnect_log > 30:
+                    logger.warning("[COUNT] RTSP read failed camera=%s (failures=%s), reconnect",
+                                   cam_name, consecutive_failures)
+                    last_reconnect_log = now
+                cap.release()
+                if counting_stop_event.wait(min(2.0 ** consecutive_failures, 30.0)):
+                    break
+                cap = cv2.VideoCapture(rtsp_url)
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                continue
+            consecutive_failures = 0
+
+            h, w = frame.shape[:2]
+            y_line = line_y_pct / 100.0 * h
+            band = min_disp_pct / 100.0 * h
+
+            results = model.track(frame, persist=True, classes=[0], conf=conf,
+                                  imgsz=imgsz, verbose=False)
+            seen_ids: set[int] = set()
+            for result in results:
+                boxes = result.boxes
+                if boxes is None or boxes.id is None:
+                    continue
+                ids = boxes.id.int().tolist()
+                xyxy = boxes.xyxy.tolist()
+                for tid, (x1, y1, x2, y2) in zip(ids, xyxy):
+                    cx = (x1 + x2) / 2.0
+                    cy = (y1 + y2) / 2.0
+                    if not _counting.in_x_range(cx, w, x_start, x_end):
+                        continue
+                    seen_ids.add(tid)
+                    prev = track_sides.get(tid)
+                    new_side = _counting.resolve_side(prev, cy, y_line, band)
+                    direction = _counting.crossing_direction(prev, new_side, invert)
+                    if direction:
+                        snap_path = None
+                        try:
+                            db.COUNTING_SNAPS_DIR.mkdir(parents=True, exist_ok=True)
+                            now_utc = datetime.now(timezone.utc)
+                            fname = f"{now_utc.strftime('%Y%m%dT%H%M%S%f')}_yolo_{direction}.jpg"
+                            p = db.COUNTING_SNAPS_DIR / fname
+                            cv2.imwrite(str(p), frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                            snap_path = str(p)
+                        except Exception:
+                            pass
+                        db.insert_counting_event(
+                            cam_id, direction,
+                            datetime.now(timezone.utc), "yolo", track_id=str(tid),
+                            snapshot_path=snap_path)
+                        logger.info("[COUNT] camera=%s track=%s -> %s", cam_name, tid, direction)
+                    if new_side is not None:
+                        track_sides[tid] = new_side
+            # dọn rác id không còn track (tránh phình bộ nhớ)
+            if len(track_sides) > 256:
+                for dead in [k for k in track_sides if k not in seen_ids]:
+                    track_sides.pop(dead, None)
+    except Exception:
+        logger.exception("[COUNT] loop failed camera=%s", cam_name)
+    finally:
+        cap.release()
+        logger.info("[COUNT] stop camera=%s", cam_name)
+
+
+def start_counting(config: dict[str, Any]) -> None:
+    """Khởi động 1 thread đếm cho mỗi camera có yolo_counting.enabled."""
+    with counting_lock:
+        if any(t.is_alive() for t in counting_threads):
+            return
+        cams = db.list_yolo_counting_cameras()
+        if not cams:
+            return
+        counting_stop_event.clear()
+        counting_threads.clear()
+        for cam in cams:
+            line_cfg = dict(cam.get("yolo_counting") or {})
+            t = threading.Thread(target=_counting_loop, args=(cam, line_cfg), daemon=True)
+            t.start()
+            counting_threads.append(t)
+        logger.info("[COUNT] engine started for %s camera(s)", len(counting_threads))
+
+
+def stop_counting(wait: bool = False) -> None:
+    counting_stop_event.set()
+    if wait:
+        for t in counting_threads:
+            if t.is_alive():
+                t.join(timeout=8)
+    counting_threads.clear()
+
+
+def restart_counting(config: dict[str, Any]) -> None:
+    stop_counting(wait=True)
+    start_counting(config)

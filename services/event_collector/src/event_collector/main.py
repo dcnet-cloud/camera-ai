@@ -10,10 +10,12 @@ import json
 import logging
 import os
 import sys
+from datetime import datetime, timezone
 from typing import Any
 
 import aiomqtt
 import asyncpg
+import httpx
 import structlog
 
 from event_collector.parser import parse_event
@@ -53,6 +55,7 @@ CREATE TABLE IF NOT EXISTS cameras (
     vendor      TEXT DEFAULT 'axis',
     model       TEXT,
     location    TEXT,
+    go2rtc_src  TEXT,
     enabled     BOOLEAN DEFAULT true,
     created_at  TIMESTAMPTZ DEFAULT now()
 );
@@ -72,6 +75,7 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS events_cam_ts ON events (cam_id, ts DESC);
 CREATE INDEX IF NOT EXISTS events_type_ts ON events (type, ts DESC);
+ALTER TABLE cameras ADD COLUMN IF NOT EXISTS go2rtc_src TEXT;
 """
 
 
@@ -97,6 +101,30 @@ def _cam_name() -> str:
 def _rtsp_url() -> str:
     ip = os.environ.get("CAM_IP", "192.168.100.47")
     return os.environ.get("CAM_RTSP_URL", f"rtsp://{ip}/axis-media/media.amp")
+
+
+async def _save_axis_snapshot(repo: Repo, cam_id: int, ev_id: int, direction: str) -> None:
+    # Best-effort tuyệt đối: mọi lỗi (DB, fs, network) chỉ log, KHÔNG được
+    # thoát ra làm gãy vòng MQTT consume.
+    try:
+        src = await repo.go2rtc_src_for(cam_id)
+        if not src:
+            return
+        base = os.environ.get("GO2RTC_INTERNAL_URL", "http://go2rtc:1984")
+        snaps = os.environ.get("COUNTING_SNAPS_DIR", "/app/data/counting_snaps")
+        os.makedirs(snaps, exist_ok=True)
+        url = f"{base.rstrip('/')}/api/frame.jpeg?src={src}"
+        async with httpx.AsyncClient(timeout=5) as cli:
+            r = await cli.get(url)
+        if r.status_code == 200 and r.content:
+            ts = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%f')
+            fname = f"{ts}_axis_{direction}.jpg"
+            fpath = os.path.join(snaps, fname)
+            with open(fpath, "wb") as f:
+                f.write(r.content)
+            await repo.set_snapshot(ev_id, fpath)
+    except Exception as exc:
+        log.warning("axis_snapshot_failed", error=str(exc))
 
 
 async def handle_message(topic: str, payload_raw: bytes, repo: Repo) -> None:
@@ -126,6 +154,7 @@ async def handle_message(topic: str, payload_raw: bytes, repo: Repo) -> None:
             log.info("counter_inserted", event_id=ev_id,
                      direction=event["direction"],
                      total_human=event["data"].get("totalHuman"))
+            await _save_axis_snapshot(repo, cam_id, ev_id, event["direction"])
     # motion + health: ignored in counting scope.
 
 

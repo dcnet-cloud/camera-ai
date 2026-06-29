@@ -51,3 +51,12 @@ class Repo:
                 cam_id, ts, direction, scenario, json.dumps(raw),
             )
             return int(row["id"]) if row else None
+
+    async def go2rtc_src_for(self, cam_id: int) -> str | None:
+        async with self.pool.acquire() as c:
+            row = await c.fetchrow("SELECT go2rtc_src FROM cameras WHERE id=$1", cam_id)
+            return (row["go2rtc_src"] or None) if row else None
+
+    async def set_snapshot(self, event_id: int, path: str) -> None:
+        async with self.pool.acquire() as c:
+            await c.execute("UPDATE events SET snapshot_path=$1 WHERE id=$2", path, event_id)

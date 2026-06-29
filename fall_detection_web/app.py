@@ -70,11 +70,18 @@ async def lifespan(app: FastAPI):
         logger.warning("Skipping auto-start monitor: %s", exc)
     except Exception as exc:
         logger.error("Could not auto-start monitor: %s", exc)
-        
+
+    # Auto-start engine đếm YOLO (độc lập với monitor fall-detect)
+    try:
+        monitor.start_counting(current_config)
+    except Exception as exc:
+        logger.error("Could not auto-start counting engine: %s", exc)
+
     yield
     # Shutdown
     monitor.stop_local_clips_maintenance(wait=True)
     monitor.stop_monitor(wait=True)
+    monitor.stop_counting(wait=True)
 
 
 app = FastAPI(title="Fall Detection Web", lifespan=lifespan)
@@ -173,6 +180,96 @@ def api_counting(_: str = Depends(auth.require_auth)):
         "occupancy": occ["occupancy"], "in": occ["in"], "out": occ["out"],
         "hourly": hourly, "log": log_rows,
     }
+
+
+def _cam_id_by_name(camera_name: str) -> tuple[int, dict[str, Any]]:
+    c = config.read_config()
+    _, camera = find_camera_by_name(c, camera_name)
+    cam_id = camera.get("id")
+    if cam_id is None:
+        raise HTTPException(status_code=404, detail="Camera chưa có trong registry")
+    return int(cam_id), camera
+
+
+def _counting_blocks(cam_id: int) -> dict[str, Any]:
+    from datetime import datetime, timezone, timedelta
+    vn = timezone(timedelta(hours=7))
+    base = db.get_counting_baseline(cam_id)
+    vn_today = datetime.now(vn).date()
+    since_ts = None
+    baseline_in = 0
+    reset_ts_iso = None
+    if base and base["reset_ts"].astimezone(vn).date() == vn_today:
+        since_ts = base["reset_ts"]
+        baseline_in = base["baseline"]
+        reset_ts_iso = base["reset_ts"].astimezone(vn).strftime("%H:%M:%S")
+    return {
+        "date": vn_today.isoformat(),
+        "camera": db.counting_block(cam_id, "axis", since_ts, baseline_in),
+        "yolo": db.counting_block(cam_id, "yolo", since_ts, baseline_in),
+        "reset_ts": reset_ts_iso,
+        "log": [{**x, "snap_url": (f"/api/counting-snap/{x['snap']}" if x["snap"] else None)}
+                for x in db.counting_log_today(cam_id)],
+    }
+
+
+@app.get("/api/counting/camera/{camera_name:path}")
+def api_counting_camera(camera_name: str, _: str = Depends(auth.require_auth)):
+    cam_id, _camera = _cam_id_by_name(camera_name)
+    return _counting_blocks(cam_id)
+
+
+@app.post("/api/counting/reset/{camera_name:path}")
+def api_counting_reset(camera_name: str, payload: dict[str, Any] = Body(...),
+                       _: str = Depends(auth.require_auth)):
+    cam_id, _camera = _cam_id_by_name(camera_name)
+    try:
+        occupancy = max(0, int(payload.get("occupancy", 0)))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="occupancy phải là số nguyên >= 0")
+    from datetime import datetime, timezone
+    db.set_counting_baseline(cam_id, datetime.now(timezone.utc), occupancy)
+    return _counting_blocks(cam_id)
+
+
+@app.get("/api/counting-snap/{filename}")
+def counting_snap(filename: str, _: str = Depends(auth.require_auth)):
+    safe = Path(filename).name
+    if safe != filename or not safe.lower().endswith(".jpg"):
+        raise HTTPException(status_code=404, detail="Not found")
+    path = db.COUNTING_SNAPS_DIR / safe
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail="Not found")
+    return FileResponse(path, media_type="image/jpeg",
+                        headers={"Cache-Control": "private, max-age=86400, immutable"})
+
+
+@app.post("/api/counting/yolo-config/{camera_name:path}")
+def api_counting_yolo_config(camera_name: str, payload: dict[str, Any] = Body(...),
+                             _: str = Depends(auth.require_auth)):
+    cam_id, _camera = _cam_id_by_name(camera_name)
+
+    def _pct(key: str, default: float) -> float:
+        try:
+            return min(100.0, max(0.0, float(payload.get(key, default))))
+        except (TypeError, ValueError):
+            return default
+
+    x_start = _pct("x_start", 0)
+    x_end = _pct("x_end", 100)
+    if x_start >= x_end:
+        raise HTTPException(status_code=400, detail="x_start phải nhỏ hơn x_end")
+    cfg = {
+        "enabled": bool(payload.get("enabled", False)),
+        "line_y": _pct("line_y", 50),
+        "x_start": x_start,
+        "x_end": x_end,
+        "min_disp": _pct("min_disp", 6),
+        "invert": bool(payload.get("invert", False)),
+    }
+    db.set_yolo_counting(cam_id, cfg)
+    monitor.restart_counting(config.read_config())
+    return {"ok": True, "yolo_counting": cfg}
 
 
 def _reid_enabled() -> bool:
@@ -510,6 +607,10 @@ def _refresh_monitor_after_camera_change() -> str:
     edits and module toggles take effect immediately. Returns a status word."""
     updated = config.read_config()
     monitor.schedule_uploaded_local_clips_cleanup(updated, reason="cameras_saved")
+    try:
+        monitor.restart_counting(updated)
+    except Exception as exc:
+        logger.warning("counting engine restart failed: %s", exc)
     if monitor.read_state().get("running"):
         monitor.restart_monitor(updated)
         return "restarted"
