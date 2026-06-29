@@ -9,7 +9,7 @@
 
 ## Mục lục
 
-1. [Resolve-at-deploy checklist (O1–O9)](#resolve-at-deploy-checklist)
+1. [Resolve-at-deploy checklist (O1–O11)](#resolve-at-deploy-checklist)
 2. [Giai đoạn A — Chuẩn bị](#giai-đoạn-a--chuẩn-bị)
 3. [Giai đoạn B — Parity verification (≥1 ngày làm việc)](#giai-đoạn-b--parity-verification)
 4. [Giai đoạn C — Flip](#giai-đoạn-c--flip)
@@ -36,6 +36,8 @@ Kiểm và giải quyết trên VM **trước khi** bắt đầu Giai đoạn A.
 | O7 | Broker migration (alternate) | N/A | **DEFER** hậu-cutover — mosquitto DCNET giữ chạy vô thời hạn (§2.1 spec) |
 | O8 | Thêm user sau cutover | FDW hiện **không có** route `/admin/users` (Phase 3 chưa implement). **Không có role tier** — mọi user đều full access (không có viewer/admin phân quyền). | Tạo user bằng INSERT trực tiếp vào postgres camera-ai (schema thực tế: `username`, `password_hash`, `created_at` — không có cột `email` hay `role`): `docker exec -it camera-ai-postgres-1 psql -U dcnet dcnet -c "INSERT INTO users (username, password_hash, created_at) VALUES ('newuser', '<bcrypt_hash>', now()::text);"` — tạo bcrypt hash với: `python3 -c "import bcrypt; print(bcrypt.hashpw(b'password', bcrypt.gensalt()).decode())"` |
 | O9 | Auth gate cho `/live/*` và `/cam/*` | Kiểm FDW code: `curl -s -o /dev/null -w "%{http_code}" http://localhost:8090/api/auth/check` sau khi stack camera-ai up | **ĐÃ GIẢI — Task 3:** forward_auth + `/api/auth/check` đã implement. `/live/*` trong Caddyfile post-flip dùng `forward_auth fall_detection_web:8090 { uri /api/auth/check }` (xem `Caddyfile.post-flip.draft`) |
+| O10 | **Registry hợp nhất (PR #7) — migration match THEO TÊN** | Sau khi stack up, so tên camera trong settings-JSON cũ vs bảng `cameras`: `docker exec camera-ai-postgres-1 psql -U dcnet dcnet -c "SELECT id, name, cam_uid FROM cameras ORDER BY name;"` | `migrate_cameras_to_table()` gộp cam settings-JSON vào bảng **match theo `name`**. Nếu tên trong settings ≠ tên trong bảng → **2 row cho 1 camera vật lý** (dup). Phải kiểm tên khớp TRƯỚC cutover; nếu lệch → đổi tên cho khớp hoặc merge tay rồi mới up |
+| O11 | **Live view cần `go2rtc_src` khớp tên stream go2rtc** | `docker exec camera-ai-postgres-1 psql -U dcnet dcnet -c "SELECT name, go2rtc_src FROM cameras WHERE live_enabled;"` vs tên stream trong `go2rtc.yaml` | Cam có `go2rtc_src` **RỖNG** → live "stream not found" (không phải lỗi NAT). Đảm bảo mỗi cam live có `go2rtc_src` = tên stream tương ứng trong `go2rtc.yaml` (vd `cam_door`). Set qua UI `/cameras` (field go2rtc src) hoặc UPDATE bảng |
 
 ---
 
