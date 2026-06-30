@@ -398,10 +398,12 @@
         </div>
         <div class="actions">
           <button id="refreshBtn" class="btn" type="button"><span data-icon="refresh"></span>Refresh</button>
+          {% if is_admin %}
           <button id="exportCamerasBtn" class="btn" type="button"><span data-icon="download"></span>Export</button>
           <button id="importCamerasBtn" class="btn" type="button"><span data-icon="upload"></span>Import</button>
           <input type="file" id="importCamerasFile" class="hidden" accept=".json" style="display:none;">
           <button id="addBtn" class="btn primary" type="button"><span data-icon="plus"></span>Add camera</button>
+          {% endif %}
         </div>
       </header>
 
@@ -502,6 +504,7 @@
     };
     document.querySelectorAll("[data-icon]").forEach(el => { el.innerHTML = icons[el.dataset.icon] || ""; });
 
+    const IS_ADMIN = {{ is_admin|tojson }};  // viewer = false → ẩn mọi nút thao tác
     const transparentPixel = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
     const state = { cameras: [], prompts: [], go2rtcUrl: "", editing: -1, snapshotUrls: {}, renderSeq: 0 };
 
@@ -561,6 +564,7 @@
       { key: "live_enabled", label: "Live" },
     ];
     function modulePills(camera, index) {
+      if (!IS_ADMIN) return "";  // viewer: chỉ xem, không toggle module
       return MODULES.map(m => {
         const on = camera[m.key] === true;
         return `<span class="mod-pill ${on ? "on" : ""}" role="switch" aria-checked="${on}" data-module="${m.key}" data-index="${index}" title="${on ? "Tắt" : "Bật"} ${esc(m.label)}">${esc(m.label)}</span>`;
@@ -642,9 +646,11 @@
               <div class="modules">${modulePills(camera, index)}</div>
               <div class="actions">
                 <a class="btn small" href="/camera/${encodeURIComponent(name)}">Open detail</a>
+                ${IS_ADMIN ? `
                 <button class="btn small" data-toggle="${index}" type="button">${camera.enabled ? "Disable" : "Enable"}</button>
                 <button class="btn small" data-edit="${index}" type="button">Edit</button>
                 <button class="btn small danger" data-delete="${index}" type="button">Delete</button>
+                ` : ""}
               </div>
             </div>
             <span class="badge status ${camera.enabled ? "good" : "bad"}">${camera.enabled ? "Enabled" : "Disabled"}</span>
@@ -859,7 +865,7 @@
       if (close) $(close.dataset.closeDialog).close();
     });
 
-    $("addBtn").addEventListener("click", () => openDialog(-1));
+    $("addBtn")?.addEventListener("click", () => openDialog(-1));  // viewer: nút vắng
     $("refreshBtn").addEventListener("click", () => {
       cancelThumbnailLoads();
       loadCameras().then(() => showToast("Cameras reloaded", "ok")).catch(err => showToast(err.message, "err"));
@@ -883,7 +889,7 @@
     });
 
     // Export Cameras
-    $("exportCamerasBtn").addEventListener("click", () => {
+    $("exportCamerasBtn")?.addEventListener("click", () => {
       try {
         const jsonString = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(state.cameras, null, 2));
         const downloadAnchor = document.createElement("a");
@@ -899,12 +905,12 @@
     });
 
     // Import Cameras trigger
-    $("importCamerasBtn").addEventListener("click", () => {
+    $("importCamerasBtn")?.addEventListener("click", () => {
       $("importCamerasFile").click();
     });
 
     // Handle File select for Import
-    $("importCamerasFile").addEventListener("change", event => {
+    $("importCamerasFile")?.addEventListener("change", event => {
       const file = event.target.files[0];
       if (!file) return;
       const reader = new FileReader();

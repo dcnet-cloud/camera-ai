@@ -125,8 +125,11 @@ def login(
         )
     
     expire_hours = 24 * 30 if remember else 8
-    token = auth.create_token(username, expire_hours=expire_hours)
-    response = RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
+    user_is_admin = bool(user.get("is_admin", True))
+    token = auth.create_token(username, is_admin=user_is_admin, expire_hours=expire_hours)
+    # Viewer không có dashboard → vào thẳng danh sách cam.
+    landing = "/" if user_is_admin else "/cameras"
+    response = RedirectResponse(url=landing, status_code=status.HTTP_302_FOUND)
     response.set_cookie(
         key="session",
         value=token,
@@ -143,25 +146,29 @@ def logout():
     return response
 
 @app.get("/", response_class=HTMLResponse)
-def index_page(request: Request, _: str = Depends(auth.require_auth)):
-    return templates.TemplateResponse(request=request, name="index.html", context={})
+def index_page(request: Request, _: str = Depends(auth.require_admin)):
+    return templates.TemplateResponse(request=request, name="index.html", context={"is_admin": True})
 
 
 @app.get("/cameras", response_class=HTMLResponse)
-def cameras_page(request: Request, _: str = Depends(auth.require_auth)):
-    return templates.TemplateResponse(request=request, name="cameras.html", context={"active_nav": "cameras"})
+def cameras_page(request: Request, _: str = Depends(auth.require_auth),
+                 admin: bool = Depends(auth.is_admin)):
+    return templates.TemplateResponse(request=request, name="cameras.html",
+                                      context={"active_nav": "cameras", "is_admin": admin})
 
 
 @app.get("/camera/{camera_name:path}", response_class=HTMLResponse)
-def camera_page(request: Request, camera_name: str, _: str = Depends(auth.require_auth)):
+def camera_page(request: Request, camera_name: str, _: str = Depends(auth.require_auth),
+                admin: bool = Depends(auth.is_admin)):
     if not camera_name.strip():
         return RedirectResponse(url="/cameras", status_code=status.HTTP_302_FOUND)
-    return templates.TemplateResponse(request=request, name="camera_detail.html", context={"camera_name": camera_name, "active_nav": "cameras"})
+    return templates.TemplateResponse(request=request, name="camera_detail.html",
+                                      context={"camera_name": camera_name, "active_nav": "cameras", "is_admin": admin})
 
 
 @app.get("/counting", response_class=HTMLResponse)
-def counting_page(request: Request, _: str = Depends(auth.require_auth)):
-    return templates.TemplateResponse(request=request, name="counting.html", context={"active_nav": "counting"})
+def counting_page(request: Request, _: str = Depends(auth.require_admin)):
+    return templates.TemplateResponse(request=request, name="counting.html", context={"active_nav": "counting", "is_admin": True})
 
 
 @app.get("/api/counting")
@@ -221,7 +228,7 @@ def api_counting_camera(camera_name: str, _: str = Depends(auth.require_auth)):
 
 @app.post("/api/counting/reset/{camera_name:path}")
 def api_counting_reset(camera_name: str, payload: dict[str, Any] = Body(...),
-                       _: str = Depends(auth.require_auth)):
+                       _: str = Depends(auth.require_admin)):
     cam_id, _camera = _cam_id_by_name(camera_name)
     try:
         occupancy = max(0, int(payload.get("occupancy", 0)))
@@ -310,7 +317,7 @@ def _build_yolo_cfg(payload: dict[str, Any]) -> dict[str, Any]:
 
 @app.post("/api/counting/yolo-config/{camera_name:path}")
 def api_counting_yolo_config(camera_name: str, payload: dict[str, Any] = Body(...),
-                             _: str = Depends(auth.require_auth)):
+                             _: str = Depends(auth.require_admin)):
     cam_id, _camera = _cam_id_by_name(camera_name)
     cfg = _build_yolo_cfg(payload)
     db.set_yolo_counting(cam_id, cfg)
@@ -320,7 +327,7 @@ def api_counting_yolo_config(camera_name: str, payload: dict[str, Any] = Body(..
 
 @app.post("/api/camera/verify-crop/{camera_name:path}")
 def api_verify_crop_config(camera_name: str, payload: dict[str, Any] = Body(...),
-                           _: str = Depends(auth.require_auth)):
+                           _: str = Depends(auth.require_admin)):
     """Bật/tắt crop ảnh đưa AI vào người (conf cao nhất) + padding, per-camera.
 
     padding = fraction của w/h bbox (0–1). Chỉ ảnh AI bị crop; ảnh
@@ -374,10 +381,10 @@ def _reid_enabled() -> bool:
 
 
 @app.get("/groups", response_class=HTMLResponse)
-def groups_page(request: Request, _: str = Depends(auth.require_auth)):
+def groups_page(request: Request, _: str = Depends(auth.require_admin)):
     return templates.TemplateResponse(
         request=request, name="groups.html",
-        context={"reid_enabled": _reid_enabled(), "active_nav": "groups"})
+        context={"reid_enabled": _reid_enabled(), "active_nav": "groups", "is_admin": True})
 
 
 @app.get("/api/groups")
@@ -432,13 +439,13 @@ def modules_page(_: str = Depends(auth.require_auth)):
 
 
 @app.get("/api/camera-modules")
-def api_camera_modules(_: str = Depends(auth.require_auth)):
+def api_camera_modules(_: str = Depends(auth.require_admin)):
     return {"cameras": db.list_cameras_all()}
 
 
 @app.post("/api/camera-modules/{cam_id}")
 def api_update_camera_modules(cam_id: int, payload: dict[str, Any] = Body(...),
-                              _: str = Depends(auth.require_auth)):
+                              _: str = Depends(auth.require_admin)):
     modules = {m: bool(payload.get(m, False))
                for m in ("counting", "fall_detection", "reid", "live")
                if m in payload}
@@ -457,10 +464,10 @@ def auth_check(_: str = Depends(auth.require_auth)):
 
 
 @app.get("/{page_name}", response_class=HTMLResponse)
-def app_page(request: Request, page_name: str, _: str = Depends(auth.require_auth)):
+def app_page(request: Request, page_name: str, _: str = Depends(auth.require_admin)):
     if page_name not in {"dashboard", "prompts", "live", "settings", "tools"}:
         raise HTTPException(status_code=404, detail="Page not found")
-    return templates.TemplateResponse(request=request, name="index.html", context={})
+    return templates.TemplateResponse(request=request, name="index.html", context={"is_admin": True})
 
 
 @app.get("/api/event-image/{filename}")
@@ -604,7 +611,7 @@ def teldrive_file(request: Request, file_id: str, file_name: str, _: str = Depen
 def update_user_credentials(
     response: Response,
     payload: dict[str, str] = Body(...),
-    username: str = Depends(auth.require_auth)
+    username: str = Depends(auth.require_admin)
 ):
     new_user = payload.get("username", "").strip()
     new_pass = payload.get("password", "")
@@ -627,11 +634,11 @@ def update_user_credentials(
         raise HTTPException(status_code=400, detail="Failed to update credentials. Username might already exist.")
 
 @app.get("/api/config")
-def get_config(_: str = Depends(auth.require_auth)):
+def get_config(_: str = Depends(auth.require_admin)):
     return {"success": True, "config": config.read_config()}
 
 @app.post("/api/config")
-def save_config(new_config: dict[str, Any] = Body(...), _: str = Depends(auth.require_auth)):
+def save_config(new_config: dict[str, Any] = Body(...), _: str = Depends(auth.require_admin)):
     try:
         updated = config.write_config(new_config)
         monitor.schedule_uploaded_local_clips_cleanup(updated, reason="settings_saved")
@@ -649,12 +656,22 @@ def save_config(new_config: dict[str, Any] = Body(...), _: str = Depends(auth.re
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+def _redact_camera(cam: dict[str, Any], admin: bool) -> dict[str, Any]:
+    """Viewer KHÔNG được thấy rtsp_url (nhúng user:pass). Trang dùng go2rtc nên
+    bỏ rtsp_url không gãy. Admin thấy nguyên."""
+    if admin:
+        return cam
+    c = dict(cam)
+    c["rtsp_url"] = ""
+    return c
+
+
 @app.get("/api/cameras")
-def get_cameras(_: str = Depends(auth.require_auth)):
+def get_cameras(_: str = Depends(auth.require_auth), admin: bool = Depends(auth.is_admin)):
     c = config.read_config()
     return {
         "success": True,
-        "cameras": c.get("cameras", []),
+        "cameras": [_redact_camera(cam, admin) for cam in c.get("cameras", [])],
         "prompts": c.get("prompts", []),
         "go2rtc_url": c.get("go2rtc_url", ""),
     }
@@ -676,16 +693,18 @@ def find_camera_by_name(c: dict[str, Any], camera_name: str) -> tuple[int, dict[
 
 
 @app.get("/api/camera/detail/{camera_name:path}")
-def get_camera_detail(camera_name: str, _: str = Depends(auth.require_auth)):
+def get_camera_detail(camera_name: str, _: str = Depends(auth.require_auth),
+                      admin: bool = Depends(auth.is_admin)):
     c = config.read_config()
     index, camera = find_camera_by_name(c, camera_name)
     return {
         "success": True,
         "index": index,
-        "camera": camera,
+        "camera": _redact_camera(camera, admin),
         "prompts": c.get("prompts", []),
         "go2rtc_url": c.get("go2rtc_url", ""),
         "status": monitor.read_state(),
+        "is_admin": admin,
     }
 
 
@@ -717,7 +736,7 @@ def _refresh_monitor_after_camera_change() -> str:
 
 
 @app.post("/api/cameras")
-def save_cameras(payload: dict[str, Any] = Body(...), _: str = Depends(auth.require_auth)):
+def save_cameras(payload: dict[str, Any] = Body(...), _: str = Depends(auth.require_admin)):
     try:
         incoming = payload.get("cameras", [])
         if not isinstance(incoming, list):
@@ -755,7 +774,7 @@ def save_cameras(payload: dict[str, Any] = Body(...), _: str = Depends(auth.requ
 
 
 @app.post("/api/teldrive/check")
-def check_teldrive_token(payload: dict[str, Any] = Body(default={}), _: str = Depends(auth.require_auth)):
+def check_teldrive_token(payload: dict[str, Any] = Body(default={}), _: str = Depends(auth.require_admin)):
     try:
         c = config.read_config()
         token = str(payload.get("token", "")).strip() or None
@@ -802,7 +821,7 @@ def get_status(_: str = Depends(auth.require_auth)):
     return data
 
 @app.post("/api/start")
-def api_start_monitor(_: str = Depends(auth.require_auth)):
+def api_start_monitor(_: str = Depends(auth.require_admin)):
     try:
         result = monitor.start_monitor(config.read_config())
         return {"success": True, "message": f"Monitor {result}"}
@@ -810,7 +829,7 @@ def api_start_monitor(_: str = Depends(auth.require_auth)):
         raise HTTPException(status_code=400, detail=str(exc))
 
 @app.post("/api/stop")
-def api_stop_monitor(_: str = Depends(auth.require_auth)):
+def api_stop_monitor(_: str = Depends(auth.require_admin)):
     monitor.stop_monitor()
     return {"success": True, "message": "Monitor stopped"}
 
@@ -956,7 +975,7 @@ def get_recordings(
 @app.delete("/api/events")
 def clear_events(
     camera: str | None = None,
-    _: str = Depends(auth.require_auth),
+    _: str = Depends(auth.require_admin),
 ):
     if camera == "" or camera == "All":
         camera = None
@@ -967,7 +986,7 @@ def clear_events(
 @app.delete("/api/recordings")
 def clear_recordings(
     camera: str | None = None,
-    _: str = Depends(auth.require_auth),
+    _: str = Depends(auth.require_admin),
 ):
     if camera == "" or camera == "All":
         camera = None
@@ -975,7 +994,7 @@ def clear_recordings(
     return {"success": True, "message": f"Deleted {deleted} recordings"}
 
 @app.post("/api/capture")
-def capture(_: str = Depends(auth.require_auth)):
+def capture(_: str = Depends(auth.require_admin)):
     try:
         c = config.read_config()
         monitor.capture_snapshot(c)
@@ -1043,7 +1062,7 @@ def get_camera_video(index: int, _: str = Depends(auth.require_auth)):
         raise HTTPException(status_code=400, detail=str(exc))
 
 @app.post("/api/test-ai")
-def test_ai(_: str = Depends(auth.require_auth)):
+def test_ai(_: str = Depends(auth.require_admin)):
     try:
         c = config.read_config()
         path = monitor.SNAPSHOT_PATH
@@ -1055,7 +1074,7 @@ def test_ai(_: str = Depends(auth.require_auth)):
         raise HTTPException(status_code=400, detail=str(exc))
 
 @app.post("/api/test-ai-camera")
-def test_ai_camera(index: int, _: str = Depends(auth.require_auth)):
+def test_ai_camera(index: int, _: str = Depends(auth.require_admin)):
     try:
         c = config.read_config()
         camera = config.get_camera(c, index)
@@ -1067,7 +1086,7 @@ def test_ai_camera(index: int, _: str = Depends(auth.require_auth)):
         raise HTTPException(status_code=400, detail=str(exc))
 
 @app.post("/api/test-telegram")
-def test_telegram(_: str = Depends(auth.require_auth)):
+def test_telegram(_: str = Depends(auth.require_admin)):
     try:
         c = config.read_config()
         path = monitor.SNAPSHOT_PATH
@@ -1079,7 +1098,7 @@ def test_telegram(_: str = Depends(auth.require_auth)):
         raise HTTPException(status_code=400, detail=str(exc))
 
 @app.post("/api/test-ai-upload")
-def test_ai_upload(file: UploadFile = File(...), _: str = Depends(auth.require_auth)):
+def test_ai_upload(file: UploadFile = File(...), _: str = Depends(auth.require_admin)):
     try:
         content = file.file.read()
         if len(content) > 10 * 1024 * 1024:
