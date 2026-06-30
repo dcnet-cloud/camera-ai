@@ -55,7 +55,9 @@
       "description": "YOLO đếm sót ~75% so Axis do _counting_loop xử lý 9.8 FPS < nguồn 17 FPS → backlog frame cũ/giật → đứt track ID → sót lượt (tệ nhất hướng IN). Fix: thread đọc riêng giữ frame mới nhất (1-slot) + dùng substream/cam thật thay rtsp://go2rtc restream + imgsz hợp lý.",
       "dependencies": ["feat-005"],
       "status": "in-progress",
-      "evidence": "ROOT CAUSE đã xác nhận (đo 2026-06-30): nguồn go2rtc giao 16.9 FPS/0 lỗi (không phải nút thắt); loop emulate 9.8 FPS → backlog 8.5s tăng vô hạn. CHƯA implement fix. Verify-khi-xong = đối chứng Axis vs YOLO ≥1h giờ cao điểm, so IN/OUT (MAE)."
+      "spec": "docs/specs/2026-06-30-yolo-counting-accuracy-fix-design.md",
+      "plan": "docs/plans/2026-06-30-yolo-counting-accuracy-fix.md",
+      "evidence": "ROOT CAUSE (đo 2026-06-30): go2rtc 16.9 FPS/0 lỗi (không nghẽn); loop sequential 9.8 FPS → backlog 8.5s tăng vô hạn. FIX implement trên nhánh feat/yolo-counting-thread-fix: _LatestFrameGrabber (thread giữ frame mới nhất) + _counting_loop xử lý theo seq mới. Verify prod (read-only probe): backlog=0, luôn realtime (skip stale không queue); init.sh OK. CHỜ (gate đóng): (1) user chốt feat-008; (2) đo accuracy live Axis vs YOLO ≥1h ở deploy + substream. CHƯA deploy/merge."
     },
     {
       "id": "feat-008",
