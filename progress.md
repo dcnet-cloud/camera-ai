@@ -17,19 +17,20 @@
 - [x] Backport event_collector snapshot vol/env vào `docker-compose.prod.yml` (main↔prod khớp)
 - [x] feat-007 **root-cause analysis** xong (chưa fix)
 - [x] Áp Harness Engineering (feature_list/progress/init/handoff + section CLAUDE.md) + migrate `docs/superpowers/{specs,plans}` → `docs/{specs,plans}` (skill `dcnet-workflow` global hoá quy trình)
+- [x] **(qua đêm 2026-06-30)** feat-007 CODE: implement threaded reader trên nhánh `feat/yolo-counting-thread-fix` (spec+plan trong docs/specs|plans) → verify cơ chế (probe prod: backlog 0) → **PR mở, CHỜ user review/merge**. KHÔNG deploy.
 
 ## What's In Progress
 
-- [ ] feat-007 — **fix engine đếm YOLO**
-  - Root cause (đo trực tiếp 2026-06-30): `_counting_loop` ([fall_detection_web/monitor.py:1332]) xử lý **9.8 FPS < nguồn 17 FPS** → `CAP_PROP_BUFFERSIZE=1` bị FFMPEG/RTSP bỏ qua → **backlog frame cũ tăng vô hạn (8.5s)** → ByteTrack đứt track ID giữa lượt → sót lượt (tệ nhất IN: live đo 0/4 IN).
-  - Bằng chứng phụ: go2rtc restream giao 16.9 FPS/0 lỗi (nguồn KHÔNG phải nút thắt); inference 12 FPS standalone; cam "DCNET - Lầu 2" bật cả fall_detection (YOLO #2) + counting (YOLO) trên cùng CPU.
-  - Fix dự kiến: (1) thread đọc riêng giữ frame mới nhất; (2) đổi `cameras.rtsp_url` từ `rtsp://go2rtc:8554/cam_door` → cam thật + substream độ phân giải thấp.
+- [ ] feat-007 — **fix engine đếm YOLO** (CODE XONG trên nhánh, chờ duyệt + đo live)
+  - Root cause (đo 2026-06-30): `_counting_loop` xử lý 9.8 FPS < nguồn 17 FPS → `CAP_PROP_BUFFERSIZE=1` bị FFMPEG bỏ qua → backlog frame cũ tăng vô hạn (8.5s) → ByteTrack đứt track ID → sót lượt (tệ nhất IN).
+  - **FIX đã code** (nhánh `feat/yolo-counting-thread-fix`): `_LatestFrameGrabber` (thread giữ frame mới nhất 1-slot) + `_counting_loop` xử lý theo seq mới → loop luôn realtime. Verify probe prod read-only: backlog=0, skip stale không queue, lag ~0.4 frame. `init.sh` OK.
+  - **CHỜ (gate đóng feat-007):** (1) user chốt feat-008; (2) deploy: rebuild image + đổi `rtsp_url`→substream cam thật + đo accuracy live Axis vs YOLO ≥1h.
 
 ## What's Next
 
-1. **User quyết feat-008** (có cam non-detect cần YOLO không) → định mức đầu tư feat-007.
-2. Implement thread latest-frame trong `_counting_loop` (+ tùy chọn substream).
-3. Deploy → chạy đối chứng Axis vs YOLO ≥1h giờ cao điểm → đo MAE IN/OUT (verify feat-007).
+1. **User review PR** `feat/yolo-counting-thread-fix` + **chốt feat-008** (có cam non-detect cần YOLO không).
+2. Nếu merge: deploy (rebuild image + đổi `rtsp_url` substream) → đối chứng Axis vs YOLO ≥1h → đo MAE IN/OUT → đóng feat-007.
+3. Nếu toàn cam Axis (feat-008=không): có thể không merge; chỉ tắt `yolo_counting`, dùng Axis.
 
 ## Blockers / Risks
 

@@ -1329,8 +1329,71 @@ def restart_monitor(config: dict[str, Any]) -> None:
 
 # ── Engine đếm YOLO độc lập (dual-counting test) ──
 
+class _LatestFrameGrabber:
+    """Đọc RTSP ở 1 thread riêng, chỉ giữ frame MỚI NHẤT (1-slot) + seq.
+
+    Vì sao cần: `cv2.CAP_PROP_BUFFERSIZE=1` bị backend FFMPEG/RTSP bỏ qua, nên khi
+    consumer (vòng YOLO) chậm hơn nguồn, `cap.read()` trả về backlog frame CŨ — độ trễ
+    tăng vô hạn, cadence giật → ByteTrack đổi track ID giữa lượt → sót đếm. Grabber rút
+    stream ở line-rate, vứt frame cũ, để `_counting_loop` luôn xử lý frame thời-gian-thực,
+    spacing đều → track ID liền mạch qua vạch.
+    """
+
+    def __init__(self, rtsp_url, stop_event, cam_name):
+        self._url = rtsp_url
+        self._stop = stop_event
+        self._cam = cam_name
+        self._lock = threading.Lock()
+        self._frame = None
+        self._seq = 0
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def start(self):
+        self._thread.start()
+        return self
+
+    def latest(self):
+        """Trả (frame, seq). frame=None khi chưa có/đang reconnect. seq tăng mỗi frame mới."""
+        with self._lock:
+            return self._frame, self._seq
+
+    def join(self, timeout=None):
+        self._thread.join(timeout=timeout)
+
+    def _run(self):
+        import cv2
+        cap = cv2.VideoCapture(self._url)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        fails = 0
+        last_log = 0.0
+        try:
+            while not self._stop.is_set():
+                ok, frame = cap.read()
+                if not ok:
+                    fails += 1
+                    now = time.time()
+                    if now - last_log > 30:
+                        logger.warning("[COUNT] RTSP read failed camera=%s (failures=%s), reconnect",
+                                       self._cam, fails)
+                        last_log = now
+                    cap.release()
+                    with self._lock:
+                        self._frame = None  # báo consumer đang reconnect
+                    if self._stop.wait(min(2.0 ** fails, 30.0)):
+                        break
+                    cap = cv2.VideoCapture(self._url)
+                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                    continue
+                fails = 0
+                with self._lock:
+                    self._frame = frame
+                    self._seq += 1
+        finally:
+            cap.release()
+
+
 def _counting_loop(camera: dict[str, Any], line_cfg: dict[str, Any]) -> None:
-    """Mở RTSP full-FPS, model.track(persist=True), line-crossing + dead-band → ghi events(counter_yolo)."""
+    """Đọc frame mới nhất qua _LatestFrameGrabber, model.track(persist=True), line-crossing + dead-band → ghi events(counter_yolo)."""
     import cv2
     from ultralytics import YOLO
     import counting as _counting
@@ -1376,10 +1439,11 @@ def _counting_loop(camera: dict[str, Any], line_cfg: dict[str, Any]) -> None:
     # cố ý — YOLO letterbox về imgsz nên upscale thủ công là no-op.
 
     track_sides: dict[int, str] = {}
-    cap = cv2.VideoCapture(rtsp_url)
-    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-    consecutive_failures = 0
-    last_reconnect_log = 0.0
+    # Đọc frame ở thread riêng, chỉ giữ frame mới nhất → loop luôn xử lý frame
+    # thời-gian-thực (hết backlog do CAP_PROP_BUFFERSIZE=1 bị FFMPEG bỏ qua). Reconnect
+    # nằm trong grabber. Xem _LatestFrameGrabber.
+    grabber = _LatestFrameGrabber(rtsp_url, counting_stop_event, cam_name).start()
+    last_seq = -1
     logger.info("[COUNT] start camera=%s model=%s imgsz=%d conf=%.2f line_y=%.0f%% "
                 "x=[%.0f,%.0f]%% min_disp=%.0f%% invert=%s roi=%s",
                 cam_name, model_name, imgsz, conf, line_y_pct, x_start, x_end,
@@ -1387,21 +1451,13 @@ def _counting_loop(camera: dict[str, Any], line_cfg: dict[str, Any]) -> None:
                 ("[%.0f,%.0f,%.0f,%.0f]" % (roi_x1, roi_y1, roi_x2, roi_y2)) if roi_enabled else "off")
     try:
         while not counting_stop_event.is_set():
-            ok, frame = cap.read()
-            if not ok:
-                consecutive_failures += 1
-                now = time.time()
-                if now - last_reconnect_log > 30:
-                    logger.warning("[COUNT] RTSP read failed camera=%s (failures=%s), reconnect",
-                                   cam_name, consecutive_failures)
-                    last_reconnect_log = now
-                cap.release()
-                if counting_stop_event.wait(min(2.0 ** consecutive_failures, 30.0)):
+            frame, seq = grabber.latest()
+            if frame is None or seq == last_seq:
+                # chưa có frame mới (đang reconnect, hoặc loop nhanh hơn nguồn) → chờ ngắn
+                if counting_stop_event.wait(0.01):
                     break
-                cap = cv2.VideoCapture(rtsp_url)
-                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                 continue
-            consecutive_failures = 0
+            last_seq = seq
 
             # ROI: detect trên vùng crop; line-crossing tính theo toạ độ crop.
             det_frame = frame
@@ -1462,7 +1518,7 @@ def _counting_loop(camera: dict[str, Any], line_cfg: dict[str, Any]) -> None:
     except Exception:
         logger.exception("[COUNT] loop failed camera=%s", cam_name)
     finally:
-        cap.release()
+        grabber.join(timeout=5)
         logger.info("[COUNT] stop camera=%s", cam_name)
 
 
