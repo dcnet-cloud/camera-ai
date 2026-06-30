@@ -103,6 +103,16 @@ ROI crop+3x thấy người Ở CỬA : 56%   (+13%)
 - Engine chạy (đã restart). Chờ người đi qua dải y=52% → ghi `counter_yolo` + thumbnail cột phải.
 - ⚠️ Probe offline dùng yolov8s/960 OK, nhưng **full-FPS live nặng CPU** — live nên giữ n@640, hoặc giảm FPS xử lý.
 
+## 6b. Chẩn đoán Axis-vs-YOLO không khớp (2026-06-30, từ data + ảnh thật)
+
+**KHÔNG phải bug.** Tỉ lệ in/out giống hệt: Axis 114/87=**1.31**, YOLO 17/13=**1.31** → logic crossing đúng, YOLO chỉ là mẫu ~15%. Lệch vì **2 vạch ở 2 vị trí vật lý khác nhau** (xác nhận bằng snapshot): 📷 Axis đếm tại **cửa kính** (xa); 🤖 YOLO đếm tại **vạch giữa phòng y=52%** (đặt đó vì cửa quá xa). Người qua cửa trước → tới vạch giữa phòng sau vài giây (lag ~1 phút), nhiều người không bao giờ chạm vạch giữa → YOLO 15%. ⚠️ Số hôm nay **bẩn** (restart engine nhiều lần khi test). ⚠️ Axis chưa chắc ground-truth (cụm in/out liên tục = có thể nhiễu). ⚠️ RTSP camera **burn sẵn overlay analytics** vào stream → YOLO detect trên frame đã có box/icon.
+
+**Quyết định (user, 2026-06-30): Option 1 — 2 cam SO CÙNG VẠCH ở cửa.** Ràng buộc: **không được detect người ngoài cửa** (lobby "Lầu 2" sau kính). Cách làm: bật ROI crop vùng cửa (loại vùng ngoài kính khỏi detect) + đặt vạch YOLO trùng vạch Axis. Đánh đổi đã biết: choke xa, recall ~56% — cần yolov8s + imgsz cao.
+
+## 6c. Preview calibrate vạch (DONE 2026-06-30) — `GET /api/counting/preview/{name}`
+
+Tuning trước đây **mù** (gõ số, chờ crossing). Thêm **preview trực quan**: `monitor.counting_preview()` lấy 1 frame (go2rtc, fallback RTSP) → chạy YOLO 1 lần với **đúng model/imgsz/conf per-cam** → vẽ **ROI (xanh lá) + vạch (cam) + box người (đỏ, chấm xanh=trong x-range sẽ đếm / vàng=ngoài)** + header `model/imgsz/conf/people` → JPEG. Endpoint GET query-param (read-only, KHÔNG lưu DB, KHÔNG restart loop); cfg dựng qua `_build_yolo_cfg` (dùng chung POST). Form: nút **"Xem trước vạch"** → `showViewer` popup. **Workflow calibrate cửa:** kéo ROI bao cửa, nâng `roi_y1` tới khi người ngoài kính KHÔNG còn bị box, hạ vạch về ngưỡng cửa, tăng imgsz/model tới khi người ở cửa được box ổn định. Verify: endpoint trả JPEG 200 có overlay đúng hình học.
+
 ## 7. Việc còn lại / quyết định mở
 
 1. ✅ **ROI zoom-zone per-cam (DONE 2026-06-30)** — config `yolo_counting` thêm `{roi_enabled,roi_x1,roi_y1,roi_x2,roi_y2,imgsz}`. `_counting_loop` crop vùng ROI trước `model.track`; **line-crossing tính theo toạ độ CROP** → khi bật ROI, `line_y`/`x_start`/`x_end` = **% TRONG ROI** (đặt vạch trong ROI: `roi_y1<line_y<roi_y2`, nếu không → 0 crossing, lặp lại bẫy y=38 §3). Snapshot vẫn lưu **full frame** (context). Form trong block YOLO + validate API (`x1<x2 && y1<y2`). Backward-compat: roi off = byte-identical path cũ. Verify: rebuild + restart → engine boot `imgsz=960 roi=[40,5,80,50]`, loop chạy không crash; revert về baseline (imgsz=0, roi off) tránh peg CPU.

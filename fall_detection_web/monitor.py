@@ -1391,6 +1391,87 @@ def _counting_loop(camera: dict[str, Any], line_cfg: dict[str, Any]) -> None:
         logger.info("[COUNT] stop camera=%s", cam_name)
 
 
+def counting_preview(camera: dict[str, Any], line_cfg: dict[str, Any],
+                     config: dict[str, Any]) -> bytes:
+    """Vẽ ROI + vạch + x-range + box người YOLO detect lên 1 frame hiện tại → JPEG.
+    Dùng để calibrate vạch trực quan (trúng cửa, loại người ngoài kính). KHÔNG đếm."""
+    import cv2
+    from ultralytics import YOLO
+
+    # 1 frame: ưu tiên go2rtc, fallback RTSP trực tiếp như loop đếm.
+    try:
+        frame = read_go2rtc_frame(config, camera)
+    except Exception:
+        rtsp_url = str(camera.get("rtsp_url") or "")
+        if not rtsp_url:
+            raise RuntimeError("Camera không có nguồn frame (go2rtc/rtsp)")
+        cap = cv2.VideoCapture(rtsp_url)
+        try:
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            ok, frame = cap.read()
+        finally:
+            cap.release()
+        if not ok or frame is None:
+            raise RuntimeError("Không đọc được frame từ RTSP")
+
+    H, W = frame.shape[:2]
+    line_y_pct = float(line_cfg.get("line_y", 50))
+    x_start = float(line_cfg.get("x_start", 0))
+    x_end = float(line_cfg.get("x_end", 100))
+    roi_enabled = bool(line_cfg.get("roi_enabled", False))
+    if roi_enabled:
+        rx1, rx2 = sorted((int(float(line_cfg.get("roi_x1", 0)) / 100.0 * W),
+                           int(float(line_cfg.get("roi_x2", 100)) / 100.0 * W)))
+        ry1, ry2 = sorted((int(float(line_cfg.get("roi_y1", 0)) / 100.0 * H),
+                           int(float(line_cfg.get("roi_y2", 100)) / 100.0 * H)))
+        rx1, ry1 = max(0, rx1), max(0, ry1)
+        rx2, ry2 = min(W, rx2), min(H, ry2)
+    else:
+        rx1, ry1, rx2, ry2 = 0, 0, W, H
+    roi_w, roi_h = max(1, rx2 - rx1), max(1, ry2 - ry1)
+    det_frame = frame[ry1:ry2, rx1:rx2] if roi_enabled else frame
+
+    # detect 1 lần với cùng model/imgsz/conf per-cam (giống loop).
+    g_model = str(config["yolo_model"])
+    model_name = str(line_cfg.get("model") or g_model)
+    try:
+        imgsz = int(line_cfg["imgsz"]) if line_cfg.get("imgsz") else int(config["yolo_imgsz"])
+    except (TypeError, ValueError):
+        imgsz = int(config["yolo_imgsz"])
+    try:
+        conf = float(line_cfg["conf"]) if line_cfg.get("conf") else float(config["confidence"])
+    except (TypeError, ValueError):
+        conf = float(config["confidence"])
+    results = YOLO(model_name).predict(det_frame, classes=[0], conf=conf, imgsz=imgsz,
+                                       verbose=False)
+
+    # toạ độ vạch/x-range tính theo % TRONG ROI (giống loop), vẽ về full frame.
+    y_line = ry1 + line_y_pct / 100.0 * roi_h
+    xa = rx1 + x_start / 100.0 * roi_w
+    xb = rx1 + x_end / 100.0 * roi_w
+    if roi_enabled:
+        cv2.rectangle(frame, (rx1, ry1), (rx2, ry2), (0, 200, 0), 2)  # ROI = xanh lá
+    # box người (đỏ) + tâm; chấm xanh nếu trong x-range (sẽ được đếm), vàng nếu ngoài.
+    for r in results:
+        b = r.boxes
+        if b is None:
+            continue
+        for (x1, y1, x2, y2) in b.xyxy.tolist():
+            fx1, fy1, fx2, fy2 = int(rx1 + x1), int(ry1 + y1), int(rx1 + x2), int(ry1 + y2)
+            cv2.rectangle(frame, (fx1, fy1), (fx2, fy2), (0, 0, 230), 2)
+            cx, cy = (fx1 + fx2) // 2, (fy1 + fy2) // 2
+            in_x = xa <= cx <= xb
+            cv2.circle(frame, (cx, cy), 5, (0, 200, 0) if in_x else (0, 200, 230), -1)
+    cv2.line(frame, (int(xa), int(y_line)), (int(xb), int(y_line)), (255, 80, 0), 3)  # vạch = cam
+    n = sum(len(r.boxes) for r in results if r.boxes is not None)
+    cv2.putText(frame, f"model={model_name} imgsz={imgsz} conf={conf:.2f} people={n}",
+                (12, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+    ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+    if not ok:
+        raise RuntimeError("Không encode được ảnh preview")
+    return buf.tobytes()
+
+
 def start_counting(config: dict[str, Any]) -> None:
     """Khởi động 1 thread đếm cho mỗi camera có yolo_counting.enabled."""
     with counting_lock:

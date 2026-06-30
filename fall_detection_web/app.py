@@ -252,10 +252,9 @@ _YOLO_MODEL_ALLOWLIST = {
 
 
 @app.post("/api/counting/yolo-config/{camera_name:path}")
-def api_counting_yolo_config(camera_name: str, payload: dict[str, Any] = Body(...),
-                             _: str = Depends(auth.require_auth)):
-    cam_id, _camera = _cam_id_by_name(camera_name)
-
+def _build_yolo_cfg(payload: dict[str, Any]) -> dict[str, Any]:
+    """Dựng + validate yolo_counting từ payload/query. Raise HTTPException nếu sai.
+    Dùng chung cho POST (lưu DB) và preview (vẽ thử)."""
     def _pct(key: str, default: float) -> float:
         try:
             return min(100.0, max(0.0, float(payload.get(key, default))))
@@ -266,7 +265,7 @@ def api_counting_yolo_config(camera_name: str, payload: dict[str, Any] = Body(..
     x_end = _pct("x_end", 100)
     if x_start >= x_end:
         raise HTTPException(status_code=400, detail="x_start phải nhỏ hơn x_end")
-    cfg = {
+    cfg: dict[str, Any] = {
         "enabled": bool(payload.get("enabled", False)),
         "line_y": _pct("line_y", 50),
         "x_start": x_start,
@@ -277,8 +276,7 @@ def api_counting_yolo_config(camera_name: str, payload: dict[str, Any] = Body(..
 
     # ROI zoom-zone (tuỳ chọn) — crop vùng choke xa trước detect. Khi BẬT, line_y/x_start/x_end
     # diễn giải theo % TRONG ROI. roi_y1 < line_y < roi_y2 nếu không sẽ 0 crossing (xem doc §3).
-    roi_enabled = bool(payload.get("roi_enabled", False))
-    if roi_enabled:
+    if bool(payload.get("roi_enabled", False)):
         roi_x1, roi_x2 = _pct("roi_x1", 0), _pct("roi_x2", 100)
         roi_y1, roi_y2 = _pct("roi_y1", 0), _pct("roi_y2", 100)
         if roi_x1 >= roi_x2 or roi_y1 >= roi_y2:
@@ -308,10 +306,35 @@ def api_counting_yolo_config(camera_name: str, payload: dict[str, Any] = Body(..
             cfg["conf"] = max(0.01, min(1.0, float(raw_conf)))
         except (TypeError, ValueError):
             pass
+    return cfg
 
+
+def api_counting_yolo_config(camera_name: str, payload: dict[str, Any] = Body(...),
+                             _: str = Depends(auth.require_auth)):
+    cam_id, _camera = _cam_id_by_name(camera_name)
+    cfg = _build_yolo_cfg(payload)
     db.set_yolo_counting(cam_id, cfg)
     monitor.restart_counting(config.read_config())
     return {"ok": True, "yolo_counting": cfg}
+
+
+@app.get("/api/counting/preview/{camera_name:path}")
+def api_counting_preview(camera_name: str, request: Request,
+                         _: str = Depends(auth.require_auth)):
+    """Vẽ ROI+vạch+box detect lên frame hiện tại → JPEG. Calibrate vạch trực quan."""
+    _cam_id, camera = _cam_id_by_name(camera_name)
+    payload = dict(request.query_params)
+    # query string: ép bool cho roi_enabled/invert/enabled (đến dạng "true"/"false").
+    for k in ("roi_enabled", "invert", "enabled"):
+        if k in payload:
+            payload[k] = str(payload[k]).lower() in ("1", "true", "yes", "on")
+    cfg = _build_yolo_cfg(payload)
+    try:
+        jpeg = monitor.counting_preview(camera, cfg, config.read_config())
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Không tạo được preview: {exc}")
+    return Response(content=jpeg, media_type="image/jpeg",
+                    headers={"Cache-Control": "no-store"})
 
 
 def _reid_enabled() -> bool:
