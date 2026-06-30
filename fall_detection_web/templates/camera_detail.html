@@ -225,11 +225,17 @@
     .count-cfg input[type=number] { width: 72px; }
     .count-reset { grid-column: span 2; display: flex; align-items: center; gap: 8px; margin-top: 4px; }
     .count-reset .k { font-size: 12px; color: var(--muted); flex: 1; }
-    .count-log { grid-column: span 2; display:flex; flex-direction:column; gap:6px; max-height:320px; overflow-y:auto; }
+    .count-log { grid-column: span 2; display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+    .count-log .col { display:flex; flex-direction:column; min-width:0; }
+    .count-log .col-head { font-size:13px; font-weight:700; padding:4px 0; border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--surface,#0d1117); z-index:1; }
+    .count-log .col-list { display:flex; flex-direction:column; gap:6px; max-height:320px; overflow-y:auto; }
+    .count-log .empty { color:var(--muted); font-size:12px; padding:8px 0; }
     .count-log .row { display:flex; align-items:center; gap:10px; font-size:13px; padding:4px 0; border-bottom:1px solid var(--line); }
-    .count-log img { width:64px; height:40px; object-fit:cover; border-radius:4px; cursor:pointer; }
+    .count-log img { width:64px; height:40px; object-fit:cover; border-radius:4px; cursor:pointer; transition:transform .15s ease; }
+    .count-log img:hover { transform:scale(1.08); }
     .count-log .src-axis { color:#378ADD; } .count-log .src-yolo { color:#EF9F27; }
     .count-log .dir-in { color: var(--good,#3fb950); } .count-log .dir-out { color: var(--bad,#f85149); }
+    @media (max-width:640px){ .count-log{ grid-template-columns:1fr; } }
 
     .toolbar { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
     select, input {
@@ -771,7 +777,45 @@
             <div class="row"><label>Đoạn X kết thúc (%)</label><input type="number" id="cfgXEnd" min="0" max="100" value="71"></div>
             <div class="row"><label>Dịch chuyển tối thiểu (%)</label><input type="number" id="cfgMinDisp" min="0" max="30" value="6"></div>
             <div class="row"><label>Đảo chiều (xuống=Ra)</label><input type="checkbox" id="cfgInvert"></div>
-            <div class="row"><button class="btn" onclick="saveYoloConfig()">Lưu vạch</button></div>
+            <div class="row"><label>Model (rỗng=global)</label>
+              <select id="cfgModel">
+                <option value="">— dùng global —</option>
+                <option value="yolov8n.pt">yolov8n (nhẹ)</option>
+                <option value="yolov8s.pt">yolov8s</option>
+                <option value="yolov8m.pt">yolov8m</option>
+                <option value="yolov8l.pt">yolov8l</option>
+                <option value="yolov8x.pt">yolov8x (nặng)</option>
+                <option value="yolo11n.pt">yolo11n</option>
+                <option value="yolo11s.pt">yolo11s</option>
+                <option value="yolo11m.pt">yolo11m</option>
+              </select></div>
+            <div class="row"><label>imgsz (0=dùng global)</label><input type="number" id="cfgImgsz" min="0" max="1920" step="32" value="0"></div>
+            <div class="row"><label>conf (0=dùng global)</label><input type="number" id="cfgConf" min="0" max="1" step="0.05" value="0"></div>
+            <hr style="border-color:var(--border);opacity:.4;margin:.5rem 0">
+            <div class="row"><label>ROI zoom-zone (cam choke xa)</label><input type="checkbox" id="cfgRoiEnabled"></div>
+            <div class="row" style="font-size:.8em;color:var(--muted)">Khi bật: vạch Y & đoạn X tính theo % TRONG ROI. Đặt vạch nằm trong ROI (y1&lt;line_y&lt;y2).</div>
+            <div class="row"><label>ROI X1 / Y1 (%)</label><span><input type="number" id="cfgRoiX1" min="0" max="100" value="40" style="width:64px"> <input type="number" id="cfgRoiY1" min="0" max="100" value="5" style="width:64px"></span></div>
+            <div class="row"><label>ROI X2 / Y2 (%)</label><span><input type="number" id="cfgRoiX2" min="0" max="100" value="80" style="width:64px"> <input type="number" id="cfgRoiY2" min="0" max="100" value="50" style="width:64px"></span></div>
+            <div class="row">
+              <button class="btn" onclick="previewYolo()">Xem trước vạch</button>
+              <button class="btn" onclick="saveYoloConfig()">Lưu vạch</button>
+            </div>
+            <div class="row" style="font-size:.8em;color:var(--muted)">Xem trước vẽ vạch (cam) + ROI (xanh lá) + người YOLO detect (đỏ, chấm xanh=sẽ đếm). Kiểm tra vạch trúng cửa & người ngoài kính KHÔNG bị box.</div>
+          </details>
+        </div>
+        <div class="count-block" style="background:rgba(123,97,255,0.10);border-left-color:#7B61FF">
+          <h4><span data-icon="image"></span>Ảnh đưa AI nhận diện</h4>
+          <details class="crop-cfg">
+            <summary>⚙ Crop vào người trước khi gửi AI</summary>
+            <div class="row" style="font-size:.8em;color:var(--muted)">Cắt khung vào người (YOLO conf cao nhất) + đệm trước khi gửi AI — tránh AI hiểu nhầm màn hình/đồ ở nền. Chỉ ảnh gửi AI bị cắt; ảnh log/Telegram/snapshot live vẫn full frame.</div>
+            <div class="row"><label>Bật crop vào người</label><input type="checkbox" id="cropEnabled"></div>
+            <div class="row"><label>Đệm quanh người (%)</label><input type="number" id="cropPadding" min="0" max="100" step="5" value="15"></div>
+            <hr style="border-color:var(--border);opacity:.4;margin:.5rem 0">
+            <div class="row" style="font-size:.8em;color:var(--muted)">Vùng loại trừ: bỏ người YOLO detect trong vùng này (vd dàn TV/màn hình hiển thị người). % trên khung. Người thật chỉ chồng &lt;50% vào vùng vẫn được giữ.</div>
+            <div class="row"><label>Bật vùng loại trừ</label><input type="checkbox" id="ignEnabled"></div>
+            <div class="row"><label>X1 / Y1 (%)</label><span><input type="number" id="ignX1" min="0" max="100" value="0" style="width:64px"> <input type="number" id="ignY1" min="0" max="100" value="15" style="width:64px"></span></div>
+            <div class="row"><label>X2 / Y2 (%)</label><span><input type="number" id="ignX2" min="0" max="100" value="26" style="width:64px"> <input type="number" id="ignY2" min="0" max="100" value="52" style="width:64px"></span></div>
+            <div class="row"><button class="btn" onclick="saveCropConfig()">Lưu crop + vùng loại trừ</button></div>
           </details>
         </div>
         <div class="count-reset">
@@ -807,12 +851,22 @@
         const d = await api(`/api/counting/camera/${encodeURIComponent(routeCameraName)}`);
         setCountVal("camIn", d.camera.in);  setCountVal("camOut", d.camera.out);  setCountVal("camOcc", d.camera.occupancy);
         setCountVal("yoloIn", d.yolo.in);   setCountVal("yoloOut", d.yolo.out);   setCountVal("yoloOcc", d.yolo.occupancy);
-        const log = (d.log || []).map(e => `<div class="row">
-          <span style="width:64px">${e.snap_url ? `<img src="${e.snap_url}" onclick="window.open('${e.snap_url}')">` : "—"}</span>
-          <span class="src-${e.source}" style="width:120px">${e.source === "yolo" ? "🤖 YOLO" : "📷 Camera"}</span>
+        const rowHtml = (e) => `<div class="row">
+          <span style="width:64px">${e.snap_url ? `<img src="${e.snap_url}" data-snap="${e.snap_url}" data-title="${e.source === "yolo" ? "🤖 YOLO" : "📷 Camera"} · ${e.direction === "in" ? "VÀO" : "RA"} · ${e.time}">` : "—"}</span>
           <span class="dir-${e.direction}" style="width:60px">${e.direction === "in" ? "VÀO" : "RA"}</span>
-          <span style="color:var(--muted)">${e.time}</span></div>`).join("");
-        const el = document.getElementById("countLog"); if (el) el.innerHTML = log || `<div style="color:var(--muted);font-size:12px">Chưa có lượt nào hôm nay.</div>`;
+          <span style="color:var(--muted)">${e.time}</span></div>`;
+        const col = (rows, emptyTxt) => rows.length ? rows.map(rowHtml).join("") : `<div class="empty">${emptyTxt}</div>`;
+        const axis = (d.log || []).filter(e => e.source !== "yolo");
+        const yolo = (d.log || []).filter(e => e.source === "yolo");
+        const el = document.getElementById("countLog");
+        if (el) {
+          el.innerHTML = `
+            <div class="col"><div class="col-head src-axis">📷 Camera (Axis)</div><div class="col-list">${col(axis, "Chưa có lượt nào hôm nay.")}</div></div>
+            <div class="col"><div class="col-head src-yolo">🤖 YOLO (máy local)</div><div class="col-list">${col(yolo, "Chưa có lượt nào hôm nay.")}</div></div>`;
+          el.querySelectorAll("img[data-snap]").forEach(img => {
+            img.onclick = () => showViewer(img.dataset.title, img.dataset.snap, "image");
+          });
+        }
         // nạp cấu hình vạch hiện tại từ camera (chỉ khi form chưa mở để khỏi đè khi đang sửa)
         const cfg = (state.camera && state.camera.yolo_counting) || {};
         const det = document.querySelector(".count-cfg");
@@ -823,6 +877,27 @@
           if (cfg.x_end != null && $("cfgXEnd")) $("cfgXEnd").value = cfg.x_end;
           if (cfg.min_disp != null && $("cfgMinDisp")) $("cfgMinDisp").value = cfg.min_disp;
           if ($("cfgInvert")) $("cfgInvert").checked = !!cfg.invert;
+          if ($("cfgModel")) $("cfgModel").value = cfg.model || "";
+          if ($("cfgImgsz")) $("cfgImgsz").value = cfg.imgsz != null ? cfg.imgsz : 0;
+          if ($("cfgConf")) $("cfgConf").value = cfg.conf != null ? cfg.conf : 0;
+          if ($("cfgRoiEnabled")) $("cfgRoiEnabled").checked = !!cfg.roi_enabled;
+          if (cfg.roi_x1 != null && $("cfgRoiX1")) $("cfgRoiX1").value = cfg.roi_x1;
+          if (cfg.roi_y1 != null && $("cfgRoiY1")) $("cfgRoiY1").value = cfg.roi_y1;
+          if (cfg.roi_x2 != null && $("cfgRoiX2")) $("cfgRoiX2").value = cfg.roi_x2;
+          if (cfg.roi_y2 != null && $("cfgRoiY2")) $("cfgRoiY2").value = cfg.roi_y2;
+        }
+        // crop ảnh AI: padding lưu dạng fraction (0–1), UI hiển thị %
+        const ccfg = (state.camera && state.camera.verify_crop) || {};
+        const cdet = document.querySelector(".crop-cfg");
+        if (cdet && !cdet.open) {
+          if ($("cropEnabled")) $("cropEnabled").checked = !!ccfg.enabled;
+          if ($("cropPadding")) $("cropPadding").value = ccfg.padding != null ? Math.round(ccfg.padding * 100) : 15;
+          const z = (ccfg.ignore_zones || [])[0];
+          if ($("ignEnabled")) $("ignEnabled").checked = !!(ccfg.ignore_zones || []).length;
+          if (z && z.length === 4) {
+            $("ignX1").value = z[0]; $("ignY1").value = z[1];
+            $("ignX2").value = z[2]; $("ignY2").value = z[3];
+          }
         }
       } catch (e) { /* fail-open: giữ "–" */ }
     }
@@ -839,21 +914,60 @@
         await loadCounting();
       } catch (e) { showToast(e.message || "Lỗi reset", "bad"); }
     }
-    async function saveYoloConfig() {
-      const cfg = {
+    function collectYoloCfg() {
+      return {
         enabled: $("cfgEnabled").checked,
         line_y: parseFloat($("cfgLineY").value),
         x_start: parseFloat($("cfgXStart").value),
         x_end: parseFloat($("cfgXEnd").value),
         min_disp: parseFloat($("cfgMinDisp").value),
         invert: $("cfgInvert").checked,
+        model: $("cfgModel").value || "",
+        imgsz: parseInt($("cfgImgsz").value || "0", 10) || 0,
+        conf: parseFloat($("cfgConf").value) || 0,
+        roi_enabled: $("cfgRoiEnabled").checked,
+        roi_x1: parseFloat($("cfgRoiX1").value),
+        roi_y1: parseFloat($("cfgRoiY1").value),
+        roi_x2: parseFloat($("cfgRoiX2").value),
+        roi_y2: parseFloat($("cfgRoiY2").value),
       };
+    }
+    async function saveYoloConfig() {
+      const cfg = collectYoloCfg();
       try {
         await api(`/api/counting/yolo-config/${encodeURIComponent(routeCameraName)}`,
           { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cfg) });
         showToast("Đã lưu vạch đếm YOLO", "ok");
         if (state.camera) state.camera.yolo_counting = cfg;
       } catch (e) { showToast(e.message || "Lỗi lưu cấu hình", "bad"); }
+    }
+    async function saveCropConfig() {
+      const zones = [];
+      if ($("ignEnabled").checked) {
+        zones.push([
+          parseFloat($("ignX1").value) || 0, parseFloat($("ignY1").value) || 0,
+          parseFloat($("ignX2").value) || 0, parseFloat($("ignY2").value) || 0,
+        ]);
+      }
+      const cfg = {
+        enabled: $("cropEnabled").checked,
+        padding: (parseFloat($("cropPadding").value) || 0) / 100,  // % → fraction
+        ignore_zones: zones,
+      };
+      try {
+        await api(`/api/camera/verify-crop/${encodeURIComponent(routeCameraName)}`,
+          { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cfg) });
+        showToast("Đã lưu cấu hình crop ảnh AI", "ok");
+        if (state.camera) state.camera.verify_crop = cfg;
+      } catch (e) { showToast(e.message || "Lỗi lưu crop", "bad"); }
+    }
+    function previewYolo() {
+      const cfg = collectYoloCfg();
+      const qs = new URLSearchParams();
+      Object.entries(cfg).forEach(([k, v]) => qs.set(k, v));
+      qs.set("_t", Date.now());  // bust cache mỗi lần xem
+      showViewer("Xem trước vạch đếm YOLO",
+        `/api/counting/preview/${encodeURIComponent(routeCameraName)}?${qs}`, "image");
     }
     async function loadStatus() {
       const data = await api("/api/status");
@@ -1218,6 +1332,7 @@
 
     $("openViewerBtn").onclick = () => { if (state.viewerUrl) window.open(state.viewerUrl, "_blank"); };
     $("viewerDialog").addEventListener("close", () => { $("viewerBody").innerHTML = ""; });
+    $("viewerDialog").addEventListener("click", (e) => { if (e.target === e.currentTarget) e.currentTarget.close(); });
 
     $("startBtn").onclick = () => monitorAction("/api/start").catch(err => showToast(err.message, "err"));
     $("stopBtn").onclick = () => monitorAction("/api/stop").catch(err => showToast(err.message, "err"));

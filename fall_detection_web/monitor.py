@@ -93,6 +93,51 @@ def camera_snapshot_path(index: int) -> Path:
     return DATA_DIR / f"camera_{index}.jpg"
 
 
+def box_zone_overlap(box, zone) -> float:
+    """Fraction diện tích box nằm trong zone (cả 2 = (x1,y1,x2,y2) px)."""
+    ix1, iy1 = max(box[0], zone[0]), max(box[1], zone[1])
+    ix2, iy2 = min(box[2], zone[2]), min(box[3], zone[3])
+    inter = max(0, ix2 - ix1) * max(0, iy2 - iy1)
+    barea = max(1.0, (box[2] - box[0]) * (box[3] - box[1]))
+    return inter / barea
+
+
+def ignore_zones_px(crop_cfg: dict, frame_w: int, frame_h: int) -> list:
+    """ignore_zones lưu dạng % [x1,y1,x2,y2] → px. Bỏ zone không hợp lệ."""
+    out = []
+    for z in (crop_cfg.get("ignore_zones") or []):
+        try:
+            if len(z) != 4:
+                continue
+            out.append([z[0] / 100 * frame_w, z[1] / 100 * frame_h,
+                        z[2] / 100 * frame_w, z[3] / 100 * frame_h])
+        except Exception:
+            continue
+    return out
+
+
+def crop_person_with_padding(frame, xyxy, padding: float):
+    """Crop frame quanh bbox người + padding (fraction của w/h bbox), clamp biên.
+
+    xyxy = (x1,y1,x2,y2) toạ độ trên frame gốc (Ultralytics trả theo frame
+    bất kể imgsz). Trả crop hoặc None nếu bbox không hợp lệ.
+    """
+    try:
+        h, w = frame.shape[:2]
+        x1, y1, x2, y2 = (float(v) for v in xyxy)
+        bw, by = x2 - x1, y2 - y1
+        if bw <= 0 or by <= 0:
+            return None
+        px, py = bw * padding, by * padding
+        x1 = max(0, int(x1 - px)); y1 = max(0, int(y1 - py))
+        x2 = min(w, int(x2 + px)); y2 = min(h, int(y2 + py))
+        if x2 <= x1 or y2 <= y1:
+            return None
+        return frame[y1:y2, x1:x2]
+    except Exception:
+        return None
+
+
 def capture_rtsp_snapshot(rtsp_url: str, output_path: Path) -> Path:
     import cv2
     if not rtsp_url:
@@ -1050,9 +1095,10 @@ def _monitor_loop(config: dict[str, Any]) -> None:
                 now = time.time()
                 person_detected = False
                 best_confidence = 0.0
+                best_box_xyxy = None
                 person_count = 0
                 infer_start = time.perf_counter()
-                
+
                 results = model.predict(
                     frame,
                     verbose=False,
@@ -1060,12 +1106,26 @@ def _monitor_loop(config: dict[str, Any]) -> None:
                     imgsz=int(config["yolo_imgsz"]),
                     classes=[0],
                 )
+                # Vùng loại trừ (TV/màn hình hiển thị người) — bỏ box overlap >50%.
+                fh, fw = frame.shape[:2]
+                _ignore_px = ignore_zones_px(camera.get("verify_crop") or {}, fw, fh)
                 for result in results:
                     for box in result.boxes:
                         if int(box.cls[0]) == 0:
+                            try:
+                                xyxy = box.xyxy[0].tolist()
+                            except Exception:
+                                xyxy = None
+                            if xyxy and _ignore_px and any(
+                                box_zone_overlap(xyxy, z) > 0.5 for z in _ignore_px
+                            ):
+                                continue  # người trong vùng loại trừ → bỏ qua
                             person_detected = True
                             person_count += 1
-                            best_confidence = max(best_confidence, float(box.conf[0]))
+                            conf = float(box.conf[0])
+                            if conf > best_confidence:
+                                best_confidence = conf
+                                best_box_xyxy = xyxy
                 infer_ms = (time.perf_counter() - infer_start) * 1000
 
                 if person_detected or now - last_yolo_log[index] > 10:
@@ -1104,7 +1164,22 @@ def _monitor_loop(config: dict[str, Any]) -> None:
                         verify_path = camera_snapshot_path(index)
                         cv2.imwrite(str(verify_path), frame)
                         cv2.imwrite(str(SNAPSHOT_PATH), frame)
-                        
+
+                        # Ảnh đưa AI: mặc định = full frame (verify_path). Nếu camera bật
+                        # verify_crop → crop vào người conf cao nhất + padding, lưu file
+                        # RIÊNG; log/Telegram/snapshot live vẫn dùng verify_path full.
+                        ai_input_path = verify_path
+                        crop_cfg = camera.get("verify_crop") or {}
+                        if crop_cfg.get("enabled") and best_box_xyxy is not None:
+                            cropped = crop_person_with_padding(
+                                frame, best_box_xyxy,
+                                float(crop_cfg.get("padding", 0.15)),
+                            )
+                            if cropped is not None and cropped.size > 0:
+                                crop_path = DATA_DIR / f"camera_{index}_aicrop.jpg"
+                                cv2.imwrite(str(crop_path), cropped, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                                ai_input_path = crop_path
+
                         # Check if AI calls are suspended
                         if now < ai_suspended_until_ts:
                             import random
@@ -1114,7 +1189,7 @@ def _monitor_loop(config: dict[str, Any]) -> None:
                             ai_result = "SAFE"
                         else:
                             try:
-                                ai_result, ai_description, raw = verify_scene(verify_path, config, camera)
+                                ai_result, ai_description, raw = verify_scene(ai_input_path, config, camera)
                                 last_verify[index] = now
                                 set_state(last_ai_result=ai_result, last_verify_at=now_iso(), last_error="")
                                 
@@ -1268,9 +1343,21 @@ def _counting_loop(camera: dict[str, Any], line_cfg: dict[str, Any]) -> None:
         return
 
     cfg = read_config()
-    model = YOLO(cfg["yolo_model"])
-    imgsz = int(cfg["yolo_imgsz"])
-    conf = float(cfg["confidence"])
+    g_model = str(cfg["yolo_model"])
+    g_imgsz = int(cfg["yolo_imgsz"])
+    g_conf = float(cfg["confidence"])
+    # Per-cam override (knob đếm nằm hết trong yolo_counting cho dễ tuỳ chỉnh từng cam):
+    # model/imgsz/conf rỗng/0 → dùng global.
+    model_name = str(line_cfg.get("model") or g_model)
+    model = YOLO(model_name)
+    try:
+        imgsz = int(line_cfg["imgsz"]) if line_cfg.get("imgsz") else g_imgsz
+    except (TypeError, ValueError):
+        imgsz = g_imgsz
+    try:
+        conf = float(line_cfg["conf"]) if line_cfg.get("conf") else g_conf
+    except (TypeError, ValueError):
+        conf = g_conf
 
     line_y_pct = float(line_cfg.get("line_y", 50))
     x_start = float(line_cfg.get("x_start", 0))
@@ -1278,13 +1365,26 @@ def _counting_loop(camera: dict[str, Any], line_cfg: dict[str, Any]) -> None:
     min_disp_pct = float(line_cfg.get("min_disp", 6))
     invert = bool(line_cfg.get("invert", False))
 
+    # ROI zoom-zone (cam choke xa): crop vùng ROI trước detect → người chiếm tỉ lệ
+    # lớn hơn của imgsz = recall cao hơn. line_y/x_start/x_end khi BẬT ROI = % TRONG ROI.
+    roi_enabled = bool(line_cfg.get("roi_enabled", False))
+    roi_x1 = float(line_cfg.get("roi_x1", 0))
+    roi_y1 = float(line_cfg.get("roi_y1", 0))
+    roi_x2 = float(line_cfg.get("roi_x2", 100))
+    roi_y2 = float(line_cfg.get("roi_y2", 100))
+    # imgsz là đòn bẩy thật cho choke xa (đã resolve per-cam ở trên). cv2-upscale bỏ
+    # cố ý — YOLO letterbox về imgsz nên upscale thủ công là no-op.
+
     track_sides: dict[int, str] = {}
     cap = cv2.VideoCapture(rtsp_url)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     consecutive_failures = 0
     last_reconnect_log = 0.0
-    logger.info("[COUNT] start camera=%s line_y=%.0f%% x=[%.0f,%.0f]%% min_disp=%.0f%% invert=%s",
-                cam_name, line_y_pct, x_start, x_end, min_disp_pct, invert)
+    logger.info("[COUNT] start camera=%s model=%s imgsz=%d conf=%.2f line_y=%.0f%% "
+                "x=[%.0f,%.0f]%% min_disp=%.0f%% invert=%s roi=%s",
+                cam_name, model_name, imgsz, conf, line_y_pct, x_start, x_end,
+                min_disp_pct, invert,
+                ("[%.0f,%.0f,%.0f,%.0f]" % (roi_x1, roi_y1, roi_x2, roi_y2)) if roi_enabled else "off")
     try:
         while not counting_stop_event.is_set():
             ok, frame = cap.read()
@@ -1303,11 +1403,23 @@ def _counting_loop(camera: dict[str, Any], line_cfg: dict[str, Any]) -> None:
                 continue
             consecutive_failures = 0
 
-            h, w = frame.shape[:2]
+            # ROI: detect trên vùng crop; line-crossing tính theo toạ độ crop.
+            det_frame = frame
+            if roi_enabled:
+                H, W = frame.shape[:2]
+                rx1, rx2 = sorted((int(roi_x1 / 100.0 * W), int(roi_x2 / 100.0 * W)))
+                ry1, ry2 = sorted((int(roi_y1 / 100.0 * H), int(roi_y2 / 100.0 * H)))
+                rx1, ry1 = max(0, rx1), max(0, ry1)
+                rx2, ry2 = min(W, rx2), min(H, ry2)
+                crop = frame[ry1:ry2, rx1:rx2]
+                if crop.size:
+                    det_frame = crop
+
+            h, w = det_frame.shape[:2]
             y_line = line_y_pct / 100.0 * h
             band = min_disp_pct / 100.0 * h
 
-            results = model.track(frame, persist=True, classes=[0], conf=conf,
+            results = model.track(det_frame, persist=True, classes=[0], conf=conf,
                                   imgsz=imgsz, verbose=False)
             seen_ids: set[int] = set()
             for result in results:
@@ -1352,6 +1464,87 @@ def _counting_loop(camera: dict[str, Any], line_cfg: dict[str, Any]) -> None:
     finally:
         cap.release()
         logger.info("[COUNT] stop camera=%s", cam_name)
+
+
+def counting_preview(camera: dict[str, Any], line_cfg: dict[str, Any],
+                     config: dict[str, Any]) -> bytes:
+    """Vẽ ROI + vạch + x-range + box người YOLO detect lên 1 frame hiện tại → JPEG.
+    Dùng để calibrate vạch trực quan (trúng cửa, loại người ngoài kính). KHÔNG đếm."""
+    import cv2
+    from ultralytics import YOLO
+
+    # 1 frame: ưu tiên go2rtc, fallback RTSP trực tiếp như loop đếm.
+    try:
+        frame = read_go2rtc_frame(config, camera)
+    except Exception:
+        rtsp_url = str(camera.get("rtsp_url") or "")
+        if not rtsp_url:
+            raise RuntimeError("Camera không có nguồn frame (go2rtc/rtsp)")
+        cap = cv2.VideoCapture(rtsp_url)
+        try:
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            ok, frame = cap.read()
+        finally:
+            cap.release()
+        if not ok or frame is None:
+            raise RuntimeError("Không đọc được frame từ RTSP")
+
+    H, W = frame.shape[:2]
+    line_y_pct = float(line_cfg.get("line_y", 50))
+    x_start = float(line_cfg.get("x_start", 0))
+    x_end = float(line_cfg.get("x_end", 100))
+    roi_enabled = bool(line_cfg.get("roi_enabled", False))
+    if roi_enabled:
+        rx1, rx2 = sorted((int(float(line_cfg.get("roi_x1", 0)) / 100.0 * W),
+                           int(float(line_cfg.get("roi_x2", 100)) / 100.0 * W)))
+        ry1, ry2 = sorted((int(float(line_cfg.get("roi_y1", 0)) / 100.0 * H),
+                           int(float(line_cfg.get("roi_y2", 100)) / 100.0 * H)))
+        rx1, ry1 = max(0, rx1), max(0, ry1)
+        rx2, ry2 = min(W, rx2), min(H, ry2)
+    else:
+        rx1, ry1, rx2, ry2 = 0, 0, W, H
+    roi_w, roi_h = max(1, rx2 - rx1), max(1, ry2 - ry1)
+    det_frame = frame[ry1:ry2, rx1:rx2] if roi_enabled else frame
+
+    # detect 1 lần với cùng model/imgsz/conf per-cam (giống loop).
+    g_model = str(config["yolo_model"])
+    model_name = str(line_cfg.get("model") or g_model)
+    try:
+        imgsz = int(line_cfg["imgsz"]) if line_cfg.get("imgsz") else int(config["yolo_imgsz"])
+    except (TypeError, ValueError):
+        imgsz = int(config["yolo_imgsz"])
+    try:
+        conf = float(line_cfg["conf"]) if line_cfg.get("conf") else float(config["confidence"])
+    except (TypeError, ValueError):
+        conf = float(config["confidence"])
+    results = YOLO(model_name).predict(det_frame, classes=[0], conf=conf, imgsz=imgsz,
+                                       verbose=False)
+
+    # toạ độ vạch/x-range tính theo % TRONG ROI (giống loop), vẽ về full frame.
+    y_line = ry1 + line_y_pct / 100.0 * roi_h
+    xa = rx1 + x_start / 100.0 * roi_w
+    xb = rx1 + x_end / 100.0 * roi_w
+    if roi_enabled:
+        cv2.rectangle(frame, (rx1, ry1), (rx2, ry2), (0, 200, 0), 2)  # ROI = xanh lá
+    # box người (đỏ) + tâm; chấm xanh nếu trong x-range (sẽ được đếm), vàng nếu ngoài.
+    for r in results:
+        b = r.boxes
+        if b is None:
+            continue
+        for (x1, y1, x2, y2) in b.xyxy.tolist():
+            fx1, fy1, fx2, fy2 = int(rx1 + x1), int(ry1 + y1), int(rx1 + x2), int(ry1 + y2)
+            cv2.rectangle(frame, (fx1, fy1), (fx2, fy2), (0, 0, 230), 2)
+            cx, cy = (fx1 + fx2) // 2, (fy1 + fy2) // 2
+            in_x = xa <= cx <= xb
+            cv2.circle(frame, (cx, cy), 5, (0, 200, 0) if in_x else (0, 200, 230), -1)
+    cv2.line(frame, (int(xa), int(y_line)), (int(xb), int(y_line)), (255, 80, 0), 3)  # vạch = cam
+    n = sum(len(r.boxes) for r in results if r.boxes is not None)
+    cv2.putText(frame, f"model={model_name} imgsz={imgsz} conf={conf:.2f} people={n}",
+                (12, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+    ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+    if not ok:
+        raise RuntimeError("Không encode được ảnh preview")
+    return buf.tobytes()
 
 
 def start_counting(config: dict[str, Any]) -> None:
