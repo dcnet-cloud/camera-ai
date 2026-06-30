@@ -838,7 +838,7 @@ Trong `camera-ai/CLAUDE.md`, mục "Architecture — fall_detection_web" → dò
 
 bằng:
 
-> `db.py` — **PostgreSQL (psycopg v3, ConnectionPool)** for `incidents` (bảng fall-detection cũ tên `events`, đổi để tránh va chạm counting), `users`, `settings`. DSN qua env `DATABASE_URL`/`DB_*`. Schema tạo trong `init_db` (tường minh, không migration framework). Bảng `recordings` = filter `incidents` theo cột video. (Phase 0 migration — xem `docs/superpowers/specs/2026-06-26-dcnet-platform-migration-design.md`.)
+> `db.py` — **PostgreSQL (psycopg v3, ConnectionPool)** for `incidents` (bảng fall-detection cũ tên `events`, đổi để tránh va chạm counting), `users`, `settings`. DSN qua env `DATABASE_URL`/`DB_*`. Schema tạo trong `init_db` (tường minh, không migration framework). Bảng `recordings` = filter `incidents` theo cột video. (Phase 0 migration — xem `docs/specs/2026-06-26-dcnet-platform-migration-design.md`.)
 
 - [ ] **Step 5: Cập nhật AGENTS.md**
 

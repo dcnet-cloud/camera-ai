@@ -1,0 +1,69 @@
+{
+  "_comment": "Nguồn sự thật về trạng thái feature cho agent (Harness Engineering). status: not-started | in-progress | blocked | done. QUY TẮC: mỗi lúc chỉ 1 feature in-progress. 'done' bắt buộc có 'evidence' (PR/log/proof). Cập nhật file này + progress.md trước khi kết thúc phiên.",
+  "features": [
+    {
+      "id": "feat-001",
+      "name": "Phase 0 — Hợp nhất DB sang Postgres",
+      "description": "db.py chuyển SQLite→Postgres (psycopg), bảng FDW events→incidents. Nền cho mọi phase sau.",
+      "dependencies": [],
+      "status": "done",
+      "evidence": "PR #1 merged; init_db tạo schema tường minh; chạy prod ổn định."
+    },
+    {
+      "id": "feat-002",
+      "name": "Phase 1 — Module Đếm (Axis MQTT)",
+      "description": "event_collector (aiomqtt+asyncpg) store MQTT line-crossing Axis → events type='counter'; trang /counting.",
+      "dependencies": ["feat-001"],
+      "status": "done",
+      "evidence": "Live-proven 2026-06-26: 28 IN/30 OUT organic crossings thật."
+    },
+    {
+      "id": "feat-003",
+      "name": "Phase 3 — Modular per-customer + hợp nhất registry camera",
+      "description": "Cột flag counting/fall_detection/reid/live_enabled trên bảng cameras; 1 trang /cameras là nguồn duy nhất.",
+      "dependencies": ["feat-002"],
+      "status": "done",
+      "evidence": "PR #7 merged; /modules→redirect /cameras; migrate_cameras_to_table idempotent."
+    },
+    {
+      "id": "feat-004",
+      "name": "Phase 4 — Deploy/cutover prod",
+      "description": "camera-ai thay stack Streamlit DCNET trên VM 163.227.121.206, domain camera-test.dcnet.vn.",
+      "dependencies": ["feat-003"],
+      "status": "done",
+      "evidence": "Cutover 2026-06-30; live https://camera-test.dcnet.vn; stack cũ + DB cũ đã decommission; mosquitto+caddy giữ."
+    },
+    {
+      "id": "feat-005",
+      "name": "Dual-counting test UI (Axis vs YOLO)",
+      "description": "Trang /camera/{name}: 2 block đếm Axis (type=counter) vs YOLO (type=counter_yolo) + snapshot + reset baseline. Công cụ ĐO độ chính xác.",
+      "dependencies": ["feat-004"],
+      "status": "done",
+      "evidence": "PR #8/#9 merged + deployed; engine YOLO độc lập trong monitor.py (_counting_loop)."
+    },
+    {
+      "id": "feat-006",
+      "name": "RBAC admin/viewer + fix retry snapshot collector",
+      "description": "2 cấp quyền admin/viewer cho fall_detection_web; fix retry go2rtc frame non-200 trong event_collector.",
+      "dependencies": ["feat-004"],
+      "status": "done",
+      "evidence": "PR #11 merged; DEPLOY PROD 2026-06-30 (commit 593f9d6); verify: is_admin migrated, /api/* →401, đếm Axis+YOLO vẫn chảy."
+    },
+    {
+      "id": "feat-007",
+      "name": "Sửa độ chính xác đếm YOLO (thread latest-frame + substream)",
+      "description": "YOLO đếm sót ~75% so Axis do _counting_loop xử lý 9.8 FPS < nguồn 17 FPS → backlog frame cũ/giật → đứt track ID → sót lượt (tệ nhất hướng IN). Fix: thread đọc riêng giữ frame mới nhất (1-slot) + dùng substream/cam thật thay rtsp://go2rtc restream + imgsz hợp lý.",
+      "dependencies": ["feat-005"],
+      "status": "in-progress",
+      "evidence": "ROOT CAUSE đã xác nhận (đo 2026-06-30): nguồn go2rtc giao 16.9 FPS/0 lỗi (không phải nút thắt); loop emulate 9.8 FPS → backlog 8.5s tăng vô hạn. CHƯA implement fix. Verify-khi-xong = đối chứng Axis vs YOLO ≥1h giờ cao điểm, so IN/OUT (MAE)."
+    },
+    {
+      "id": "feat-008",
+      "name": "Chiến lược đếm per-camera production (Axis-native vs YOLO fallback)",
+      "description": "Cam có native detect (Axis) → dùng Axis, TẮT yolo_counting (+ tắt fall_detection nếu chỉ để đếm). Chỉ cam KHÔNG detect mới bật YOLO. Cần quyết: có triển khai cam non-detect (cần YOLO thật) không.",
+      "dependencies": ["feat-007"],
+      "status": "blocked",
+      "evidence": "BLOCKER: chờ user quyết có deploy cam non-detect hay không → quyết định mức đầu tư cho feat-007."
+    }
+  ]
+}

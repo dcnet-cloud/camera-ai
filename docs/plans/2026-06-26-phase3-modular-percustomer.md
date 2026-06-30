@@ -35,7 +35,7 @@
 - `fall_detection_web/app.py` — routes `GET /modules` (HTML), `GET /api/camera-modules` (JSON), `POST /api/camera-modules/{cam_id}` (toggle) — trước catch-all
 - `fall_detection_web/templates/modules.html` (Create) — SPA toggle UI
 - `fall_detection_web/templates/index.html` — nav link "Module camera"
-- `docs/superpowers/specs/2026-06-26-phase3-modular-percustomer-design.md` — rewrite reflect LIGHT scope + deferrals
+- `docs/specs/2026-06-26-phase3-modular-percustomer-design.md` — rewrite reflect LIGHT scope + deferrals
 - `CLAUDE.md` — phase table + "Phase 3 đã thêm" note
 
 ---
@@ -401,7 +401,7 @@ git commit -m "feat(phase3): module-toggle UI /modules + /api/camera-modules (SP
 Spec hiện stale (viết blind). Rewrite phản ánh thực tế: LIGHT scope, disjoint, greenfield, deferrals. CLAUDE.md phase table + note.
 
 **Files:**
-- Modify: `docs/superpowers/specs/2026-06-26-phase3-modular-percustomer-design.md`
+- Modify: `docs/specs/2026-06-26-phase3-modular-percustomer-design.md`
 - Modify: `CLAUDE.md`
 
 - [ ] **Step 1: Rewrite spec để khớp thực tế**
@@ -421,7 +421,7 @@ Cập nhật spec `2026-06-26-phase3-modular-percustomer-design.md`:
 
 ```bash
 cd /Users/vovanduc/Code/dcnet/camera-ai
-git add CLAUDE.md docs/superpowers/specs/2026-06-26-phase3-modular-percustomer-design.md
+git add CLAUDE.md docs/specs/2026-06-26-phase3-modular-percustomer-design.md
 git commit -m "docs(phase3): rewrite spec to LIGHT scope (audit reality) + mark DONE"
 ```
 

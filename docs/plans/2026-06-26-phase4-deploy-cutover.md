@@ -34,7 +34,7 @@
 
 **Modify:**
 - `fall_detection_web/app.py` — `GET /api/auth/check` (forward_auth target, JWT-gated) trước catch-all
-- `docs/superpowers/specs/2026-06-26-phase4-deploy-cutover-design.md` — status
+- `docs/specs/2026-06-26-phase4-deploy-cutover-design.md` — status
 - `CLAUDE.md` — phase table + note
 
 ---
@@ -418,7 +418,7 @@ git commit -m "docs(phase4): Caddyfile post-flip draft + cutover runbook (deploy
 
 ```bash
 cd /Users/vovanduc/Code/dcnet/camera-ai
-git add CLAUDE.md docs/superpowers/specs/2026-06-26-phase4-deploy-cutover-design.md
+git add CLAUDE.md docs/specs/2026-06-26-phase4-deploy-cutover-design.md
 git commit -m "docs(phase4): mark PREP DONE (deploy artifacts ready, VM cutover pending)"
 ```
 

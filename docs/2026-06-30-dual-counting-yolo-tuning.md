@@ -1,6 +1,6 @@
 # Dual-counting — UI 2 cột + tuning YOLO đếm người (2026-06-30)
 
-> **Working notes của session 2026-06-30.** Ghi lại: thay đổi UI trang chi tiết camera, hành trình tuning engine đếm YOLO, **kết quả thí nghiệm thực đo** (63 ảnh snapshot), menu giải pháp tầng-ngoài, config live hiện tại, và việc còn lại. Liên quan: tính năng [dual-counting test (PR #8)](superpowers/specs/2026-06-29-dual-counting-test-design.md) — đã merge `main`.
+> **Working notes của session 2026-06-30.** Ghi lại: thay đổi UI trang chi tiết camera, hành trình tuning engine đếm YOLO, **kết quả thí nghiệm thực đo** (63 ảnh snapshot), menu giải pháp tầng-ngoài, config live hiện tại, và việc còn lại. Liên quan: tính năng [dual-counting test (PR #8)](specs/2026-06-29-dual-counting-test-design.md) — đã merge `main`.
 
 ## 0. Bối cảnh đầu session
 

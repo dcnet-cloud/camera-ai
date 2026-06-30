@@ -1007,7 +1007,7 @@ Collector nối cloud broker đọc crossing thật → `events` có row → tra
 
 **Files:**
 - Modify: `CLAUDE.md` (bảng phase: Phase 1 → DONE)
-- Reference: `docs/superpowers/specs/2026-06-26-phase1-counting-design.md` (cập nhật Trạng thái)
+- Reference: `docs/specs/2026-06-26-phase1-counting-design.md` (cập nhật Trạng thái)
 
 - [ ] **Step 1: Up full stack với cred broker thật**
 
@@ -1055,7 +1055,7 @@ Trong `CLAUDE.md` (camera-ai), bảng phase migration: Phase 1 → ✅ DONE + pl
 
 ```bash
 cd /Users/vovanduc/Code/dcnet/camera-ai
-git add CLAUDE.md docs/superpowers/specs/2026-06-26-phase1-counting-design.md
+git add CLAUDE.md docs/specs/2026-06-26-phase1-counting-design.md
 git commit -m "docs(phase1): mark counting module DONE + live-verified"
 ```
 

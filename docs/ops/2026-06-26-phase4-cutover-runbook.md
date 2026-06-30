@@ -3,7 +3,7 @@
 **Ngày soạn:** 2026-06-26
 **Trạng thái:** DRAFT — dùng làm guide cho session `dcnet-deploy`
 **VM prod:** `163.227.121.206` (`ssh camera`), domain `camera-test.dcnet.vn`
-**Spec nguồn:** `docs/superpowers/specs/2026-06-26-phase4-deploy-cutover-design.md`
+**Spec nguồn:** `docs/specs/2026-06-26-phase4-deploy-cutover-design.md`
 
 ---
 
@@ -487,7 +487,7 @@ Tốc độ ưu tiên tại deploy: nếu image đã build OK với `requirement
 
 ## Liên quan
 
-- Spec: [`docs/superpowers/specs/2026-06-26-phase4-deploy-cutover-design.md`](../superpowers/specs/2026-06-26-phase4-deploy-cutover-design.md)
+- Spec: [`docs/specs/2026-06-26-phase4-deploy-cutover-design.md`](../specs/2026-06-26-phase4-deploy-cutover-design.md)
 - Caddyfile draft: [`docs/ops/Caddyfile.post-flip.draft`](Caddyfile.post-flip.draft)
-- Migration tổng thể: [`docs/superpowers/specs/2026-06-26-dcnet-platform-migration-design.md`](../superpowers/specs/2026-06-26-dcnet-platform-migration-design.md)
+- Migration tổng thể: [`docs/specs/2026-06-26-dcnet-platform-migration-design.md`](../specs/2026-06-26-dcnet-platform-migration-design.md)
 - Deploy skill: `dcnet-deploy`

@@ -585,7 +585,7 @@ Port từ Streamlit page sang Jinja + vanilla JS polling (15s, OQ5). Self-contai
   {% if not reid_enabled %}
   <div class="banner">⚠️ Module Re-ID <b>chưa bật</b> (TẮT mặc định: cam dome NO-GO + license non-commercial).
     Bật = <code>docker compose --profile reid up -d reid_worker</code> + <code>REID_ENABLED=true</code>.
-    Xem spec <code>docs/superpowers/specs/2026-06-26-phase2-group-reid-design.md §2.6</code>.</div>
+    Xem spec <code>docs/specs/2026-06-26-phase2-group-reid-design.md §2.6</code>.</div>
   {% endif %}
   <div class="nums">
     <div class="num"><div class="v" id="uniq">–</div><div class="l">Khách duy nhất (2h)</div></div>
@@ -681,7 +681,7 @@ git commit -m "feat(phase2): UI /groups + /api/groups + /api/reid-crop + nav (ba
 
 ```bash
 cd /Users/vovanduc/Code/dcnet/camera-ai
-git add CLAUDE.md docs/superpowers/specs/2026-06-26-phase2-group-reid-design.md
+git add CLAUDE.md docs/specs/2026-06-26-phase2-group-reid-design.md
 git commit -m "docs(phase2): mark Group/Re-ID module DONE (shelved, OFF default)"
 ```
 

@@ -2,6 +2,32 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Harness — BẮT ĐẦU PHIÊN Ở ĐÂY
+
+Dự án dùng **Harness Engineering**. File state là nguồn sự thật, KHÔNG dựa vào lịch sử chat.
+
+**Startup workflow (đầu mỗi phiên, trước khi sửa code):**
+1. `pwd` xác nhận đang ở repo root.
+2. Đọc section này + `feature_list.json` (feature đang `in-progress`) + `progress.md` (ngữ cảnh phiên trước).
+3. Chạy `./init.sh` (verify nhanh: syntax 2 app + docker compose config).
+4. `git log --oneline -5`. Nếu baseline hỏng → sửa baseline TRƯỚC khi thêm scope.
+
+**Working rules:**
+- **Một feature một lúc** (One feature at a time): chỉ 1 feature `in-progress` trong `feature_list.json`.
+- **Verify trước khi claim done**: chạy lệnh verify thật, không tuyên bố "xong" khi chưa có bằng chứng.
+- **Trong scope** (Stay in scope): không sửa file ngoài feature đang làm.
+
+**End of Session** (cuối phiên — Before ending a session):
+1. Cập nhật `progress.md` (Current Verified State + việc đã xong + next).
+2. Cập nhật status + `evidence` trong `feature_list.json`.
+3. Ghi blocker/risk chưa giải; cập nhật `session-handoff.md` nếu việc lớn.
+4. Commit khi ở trạng thái an toàn; để repo chạy được `./init.sh` ngay cho phiên sau.
+
+**Definition of Done** (một feature chỉ `done` khi ĐỦ cả 4):
+1. Hành vi mục tiêu đã implement; 2. Đã chạy verify thật; 3. `evidence` ghi vào `feature_list.json`/`progress.md`; 4. Repo còn restart được từ `./init.sh`.
+
+**State artifacts:** [`feature_list.json`](feature_list.json) · [`progress.md`](progress.md) · [`init.sh`](init.sh) · [`session-handoff.md`](session-handoff.md). Phần còn lại của CLAUDE.md = **dữ kiện dự án** (kiến trúc, lịch sử, prod). Quyết định/ràng buộc cứng từng app: đọc `*/AGENTS.md`.
+
 ## Repository layout
 
 This is a **monorepo of two independent applications** that share only a domain (AI camera analysis) — they have **no shared code** and are deployed separately. Treat each as its own project with its own constraints.
@@ -18,18 +44,18 @@ This is a **monorepo of two independent applications** that share only a domain 
 
 ## DCNET Platform Migration (2026-06-26)
 
-camera-ai đang trở thành **sản phẩm hợp nhất** của DCNET: đổ logic từ repo `dcnet-cloud/camera` (đếm người ra/vào + Re-ID) vào `fall_detection_web`, mỗi feature = module bật/tắt per-customer, DB thống nhất PostgreSQL. Chia 5 phase, mỗi phase 1 spec→plan→PR. **Design specs ở `docs/superpowers/specs/`, plans ở `docs/superpowers/plans/`.**
+camera-ai đang trở thành **sản phẩm hợp nhất** của DCNET: đổ logic từ repo `dcnet-cloud/camera` (đếm người ra/vào + Re-ID) vào `fall_detection_web`, mỗi feature = module bật/tắt per-customer, DB thống nhất PostgreSQL. Chia 5 phase, mỗi phase 1 spec→plan→PR. **Design specs ở `docs/specs/`, plans ở `docs/plans/`.**
 
 > **🚀 STATUS (2026-06-30): ĐÃ DEPLOY PROD — CUTOVER XONG.** camera-ai LIVE tại **https://camera-test.dcnet.vn** (thay hẳn stack Streamlit DCNET cũ). Phase 0-4 done. Cutover 2026-06-30 (làm TAY theo runbook, KHÔNG qua skill `dcnet-deploy`): deploy `/opt/camera-ai` (**rsync từ local** vì VM thiếu deploy key, không git clone được) → verify đếm Axis live → flip Caddy → **decommission stack cũ: dashboard/event_collector DCNET/cam_proxy/postgres + DB volume `camera_postgres_data` ĐÃ STOP+XOÁ**. **GIỮ (hạ tầng chung):** mosquitto (cam Axis ingest 8883 TLS — camera-ai đọc ké) + caddy (proxy/TLS, mosquitto mượn cert) + `/opt/camera/.env` (creds gốc, tái dùng) + `Caddyfile.pre-flip-*` backup. ⚠️ **KHÔNG rollback về DCNET được** (DB cũ đã xoá). ⚠️ **client-id prod = `event_collector_cameraai_prod_<rand>`** (id `event_collector_cameraai` bị instance lạ `171.243.48.224` connect sai-pass đá session loop → đổi cho miễn nhiễm; giá trị trong `/opt/camera-ai/.env` trên VM). ⚠️ **Prod DB MỚI TINH** — config YOLO dual-counting + AI Vision (§ working notes) KHÔNG sang từ dev; cấu hình lại trên prod nếu cần (đếm Axis chạy ngay). Còn lại (user tự xử): cron backup postgres camera-ai (O6), set `go2rtc_url`→`/live` cho live view, tắt instance lạ 171.243. Dev test local: `docker compose up -d` → `http://localhost:8090` (login `admin/admin`). **UI (PR #6):** mọi trang dùng chung 1 sidebar trái (`templates/_sidebar.{html,css,js}` — single source: markup + style + icon hydration) + topbar header; sửa nav 1 chỗ áp hết. `index.html` = reference. **Registry camera ĐÃ HỢP NHẤT (PR #7):** chỉ còn **1 trang `/cameras`** quản mọi camera trên bảng Postgres `cameras` (nguồn duy nhất); mỗi camera bật/tắt 4 module qua pill (Đếm / Ngã / Re-ID / Live). `/modules` → redirect `/cameras`. settings-JSON `cameras` bỏ vai trò (migrate 1 lần lúc boot, match theo tên).
 
 | Phase | Spec | Trạng thái |
 |---|---|---|
-| Tổng thể | [migration design](docs/superpowers/specs/2026-06-26-dcnet-platform-migration-design.md) | — |
-| 0. Unify DB (SQLite→Postgres) | (trong migration design) + [plan](docs/superpowers/plans/2026-06-26-phase0-unify-db-postgres.md) | ✅ DONE + merged (PR #1) |
-| 1. Module Đếm | [phase1-counting](docs/superpowers/specs/2026-06-26-phase1-counting-design.md) + [plan](docs/superpowers/plans/2026-06-26-phase1-counting.md) | ✅ DONE (pipeline live-proven — organic crossings thật 28 IN/30 OUT) |
-| 2. Module Group/Re-ID | [phase2-group-reid](docs/superpowers/specs/2026-06-26-phase2-group-reid-design.md) + [plan](docs/superpowers/plans/2026-06-26-phase2-group-reid.md) | ✅ DONE (shelved, OFF mặc định; image build defer x86) |
-| 3. Modular per-customer | [phase3-modular-percustomer](docs/superpowers/specs/2026-06-26-phase3-modular-percustomer-design.md) + [plan](docs/superpowers/plans/2026-06-26-phase3-modular-percustomer.md) | ✅ DONE + registry hợp nhất (PR #7) |
-| 4. Deploy/cutover | [phase4-deploy-cutover](docs/superpowers/specs/2026-06-26-phase4-deploy-cutover-design.md) + [plan](docs/superpowers/plans/2026-06-26-phase4-deploy-cutover.md) | ✅ **DONE — CUTOVER 2026-06-30** (live `https://camera-test.dcnet.vn`; stack cũ + DB xoá; mosquitto+caddy giữ) |
+| Tổng thể | [migration design](docs/specs/2026-06-26-dcnet-platform-migration-design.md) | — |
+| 0. Unify DB (SQLite→Postgres) | (trong migration design) + [plan](docs/plans/2026-06-26-phase0-unify-db-postgres.md) | ✅ DONE + merged (PR #1) |
+| 1. Module Đếm | [phase1-counting](docs/specs/2026-06-26-phase1-counting-design.md) + [plan](docs/plans/2026-06-26-phase1-counting.md) | ✅ DONE (pipeline live-proven — organic crossings thật 28 IN/30 OUT) |
+| 2. Module Group/Re-ID | [phase2-group-reid](docs/specs/2026-06-26-phase2-group-reid-design.md) + [plan](docs/plans/2026-06-26-phase2-group-reid.md) | ✅ DONE (shelved, OFF mặc định; image build defer x86) |
+| 3. Modular per-customer | [phase3-modular-percustomer](docs/specs/2026-06-26-phase3-modular-percustomer-design.md) + [plan](docs/plans/2026-06-26-phase3-modular-percustomer.md) | ✅ DONE + registry hợp nhất (PR #7) |
+| 4. Deploy/cutover | [phase4-deploy-cutover](docs/specs/2026-06-26-phase4-deploy-cutover-design.md) + [plan](docs/plans/2026-06-26-phase4-deploy-cutover.md) | ✅ **DONE — CUTOVER 2026-06-30** (live `https://camera-test.dcnet.vn`; stack cũ + DB xoá; mosquitto+caddy giữ) |
 
 **Phase 0 đã đổi:** `db.py` SQLite→Postgres (psycopg), bảng FDW `events`→`incidents`. Implement tuần tự (mỗi phase phụ thuộc phase trước). Khi implement 1 phase: load spec đó → `writing-plans` → `subagent-driven-development` → PR → merge.
 
@@ -43,7 +69,7 @@ camera-ai đang trở thành **sản phẩm hợp nhất** của DCNET: đổ lo
 
 ## Dual-counting test — camera-event vs YOLO (2026-06-30, PR #8, CHƯA merge)
 
-Công cụ **test song song 2 bộ đếm người ra/vào (không định danh)** trên **trang chi tiết camera** (`/camera/{name}`), để so độ chính xác. Nhánh `feat/dual-counting-test` → [PR #8](https://github.com/dcnet-cloud/camera-ai/pull/8), code-complete + reviewed, **CHƯA deploy prod**. Spec [docs/superpowers/specs/2026-06-29-dual-counting-test-design.md](docs/superpowers/specs/2026-06-29-dual-counting-test-design.md); plans [2026-06-29-dual-counting-test.md](docs/superpowers/plans/2026-06-29-dual-counting-test.md) + [2026-06-30-counting-snapshots.md](docs/superpowers/plans/2026-06-30-counting-snapshots.md).
+Công cụ **test song song 2 bộ đếm người ra/vào (không định danh)** trên **trang chi tiết camera** (`/camera/{name}`), để so độ chính xác. Nhánh `feat/dual-counting-test` → [PR #8](https://github.com/dcnet-cloud/camera-ai/pull/8), code-complete + reviewed, **CHƯA deploy prod**. Spec [docs/specs/2026-06-29-dual-counting-test-design.md](docs/specs/2026-06-29-dual-counting-test-design.md); plans [2026-06-29-dual-counting-test.md](docs/plans/2026-06-29-dual-counting-test.md) + [2026-06-30-counting-snapshots.md](docs/plans/2026-06-30-counting-snapshots.md).
 
 > **📝 Working notes (2026-06-30):** [docs/2026-06-30-dual-counting-yolo-tuning.md](docs/2026-06-30-dual-counting-yolo-tuning.md) — UI log 2 cột (Axis/YOLO) + popup, **tuning + thí nghiệm thực đo** engine đếm YOLO (model/imgsz/conf/vị-trí-vạch/ROI-crop trên 63 ảnh), menu giải pháp đếm tầng-ngoài cho cam không native detect, config live + việc còn lại. **Đọc file này để biết đang làm gì với YOLO counting.** Gate MQTT creds + `rtsp_url` cam thật ĐÃ giải trong session này (file §0).
 
@@ -108,7 +134,7 @@ Module map:
 - [`app.py`](fall_detection_web/app.py) — FastAPI routes (UI pages + `/api/*`), JWT cookie auth on every protected route via `Depends(auth.require_auth)`, Teldrive file proxy with disk caching + ETag/304, app lifespan that auto-starts the monitor on boot.
 - [`monitor.py`](fall_detection_web/monitor.py) — the engine. A background monitor thread (`_monitor_loop`) per-camera captures frames, runs YOLO, and on detection calls `process_camera_verification` → AI → alert → record. All shared state goes through a module-level lock and `read_state()`/`set_state()`. Also handles go2rtc frame fetching, RTSP fallback, clip recording (copy-codec to spare CPU), thumbnails, and local-clip cleanup maintenance threads. `start_monitor`/`stop_monitor`/`restart_monitor` are the lifecycle entry points; config changes call `restart_monitor`.
 - [`config.py`](fall_detection_web/config.py) — **3-tier config resolution: env/.env > SQLite `settings` table > `DEFAULT_CONFIG`.** Values are stored as TEXT and coerced on read (`_coerce`, `_INT_KEYS`/`_FLOAT_KEYS`/`_BOOL_KEYS`). `cameras` and `prompts` are JSON-encoded strings. Legacy `config.json` is auto-migrated into the DB once on startup. **Add a new setting in `DEFAULT_CONFIG` and (if env-overridable) `ENV_CONFIG_KEYS`, plus the right coercion set — not just in one place.**
-- [`db.py`](fall_detection_web/db.py) — **PostgreSQL (psycopg v3, ConnectionPool)** for `incidents` (bảng fall-detection cũ tên `events`, đổi để tránh va chạm counting), `users`, và `settings`. DSN qua env `DATABASE_URL`/`DB_*`. Schema tạo trong `init_db` (tường minh, không migration framework). Bảng `recordings` = filter `incidents` theo cột video. Old incidents/images auto-pruned (7-day retention). Event images on disk in `data/event_images/`. (Phase 0 migration — xem `docs/superpowers/specs/2026-06-26-dcnet-platform-migration-design.md`.)
+- [`db.py`](fall_detection_web/db.py) — **PostgreSQL (psycopg v3, ConnectionPool)** for `incidents` (bảng fall-detection cũ tên `events`, đổi để tránh va chạm counting), `users`, và `settings`. DSN qua env `DATABASE_URL`/`DB_*`. Schema tạo trong `init_db` (tường minh, không migration framework). Bảng `recordings` = filter `incidents` theo cột video. Old incidents/images auto-pruned (7-day retention). Event images on disk in `data/event_images/`. (Phase 0 migration — xem `docs/specs/2026-06-26-dcnet-platform-migration-design.md`.)
 - [`ai.py`](fall_detection_web/ai.py) — OpenAI-compatible vision call (`verify_scene`) with a primary + fallback model, robust parsing of SSE / concatenated-JSON / thinking-tag responses, verdict parsing into `(result, description, raw)`, and Telegram `sendPhoto`.
 - [`teldrive.py`](fall_detection_web/teldrive.py) — optional cloud upload to a Teldrive (Telegram-VFS) server. Auth supports a permanent **Static API Key** (sent as `Authorization: Bearer` and `X-API-Key`); files are organized into per-camera/date folders.
 - [`redis_cache.py`](fall_detection_web/redis_cache.py) — **optional, fail-open** cache for dashboard/status/events/recordings responses. Every read/write is wrapped so a missing or broken Redis silently falls through to SQLite — never let a cache error break a request. Gated on `config["redis_enabled"]`.
