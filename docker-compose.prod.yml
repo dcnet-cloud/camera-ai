@@ -50,6 +50,12 @@ services:
       MQTT_USER: ${MQTT_USER:-}
       MQTT_PASSWORD: ${MQTT_PASSWORD:-}
       MQTT_CLIENT_ID: ${MQTT_CLIENT_ID:-event_collector_cameraai}
+      # Axis snapshot lúc băng vạch: fetch go2rtc frame → lưu vào volume CHUNG fdw_data
+      # để FDW serve thumbnail. Thiếu volume/env này = Axis không có ảnh thumb.
+      GO2RTC_INTERNAL_URL: ${GO2RTC_INTERNAL_URL:-http://go2rtc:1984}
+      COUNTING_SNAPS_DIR: /app/data/counting_snaps
+    volumes:
+      - fdw_data:/app/data
     depends_on:
       postgres:
         condition: service_healthy
