@@ -114,6 +114,10 @@ def init_db() -> None:
                 created_at    TEXT NOT NULL
             )
         """)
+        # RBAC tối giản: is_admin=true thấy hết; false = viewer (chỉ /cameras + chi tiết).
+        # Default true → user cũ giữ quyền admin sau migration.
+        conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS "
+                     "is_admin BOOLEAN NOT NULL DEFAULT true")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS settings (
                 key        TEXT PRIMARY KEY,
@@ -642,11 +646,12 @@ def get_user(username: str) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
-def create_user(username: str, password_hash: str) -> None:
+def create_user(username: str, password_hash: str, is_admin: bool = True) -> None:
     with get_conn() as conn:
         conn.execute(
-            "INSERT INTO users (username, password_hash, created_at) VALUES (%s,%s,%s)",
-            (username, password_hash, now_iso()),
+            "INSERT INTO users (username, password_hash, created_at, is_admin) "
+            "VALUES (%s,%s,%s,%s)",
+            (username, password_hash, now_iso(), bool(is_admin)),
         )
 
 

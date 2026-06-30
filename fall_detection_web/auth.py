@@ -54,12 +54,12 @@ def verify_password(plain: str, hashed: str) -> bool:
         return False
 
 
-def create_token(username: str, expire_hours: float | None = None) -> str:
+def create_token(username: str, is_admin: bool = True, expire_hours: float | None = None) -> str:
     if not _JOSE_OK:
         raise RuntimeError("python-jose not installed")
     hours = expire_hours if expire_hours is not None else _SESSION_HOURS
     expire = datetime.now(timezone.utc) + timedelta(hours=hours)
-    payload: dict[str, Any] = {"sub": username, "exp": expire}
+    payload: dict[str, Any] = {"sub": username, "adm": bool(is_admin), "exp": expire}
     return _jwt.encode(payload, _JWT_SECRET, algorithm=_JWT_ALGORITHM)
 
 
@@ -72,6 +72,18 @@ def decode_token(token: str) -> str | None:
         return str(data.get("sub", "")) or None
     except Exception:
         return None
+
+
+def token_is_admin(token: str) -> bool:
+    """is_admin claim từ token. Token cũ (chưa có claim) → mặc định True để
+    không khóa session admin hiện hữu (viewer luôn được set adm=false tường minh)."""
+    if not _JOSE_OK or not _JWT_SECRET:
+        return False
+    try:
+        data = _jwt.decode(token, _JWT_SECRET, algorithms=[_JWT_ALGORITHM])
+        return bool(data.get("adm", True))
+    except Exception:
+        return False
 
 
 # FastAPI dependency
@@ -91,4 +103,25 @@ def require_auth(request: Request, session: str | None = Cookie(default=None)) -
             status_code=status.HTTP_302_FOUND,
             headers={"Location": "/login"},
         )
+    return username
+
+
+def is_admin(session: str | None = Cookie(default=None)) -> bool:
+    """Dependency/helper: viewer (is_admin=false) hay admin. Dùng để ẩn nút UI."""
+    return token_is_admin(session or "")
+
+
+def require_admin(request: Request, session: str | None = Cookie(default=None)) -> str:
+    """Như require_auth + bắt buộc is_admin. Viewer → 403 (page lẫn API). Chưa
+    đăng nhập → 302 /login (page) hoặc 401 (API), khớp require_auth."""
+    username = decode_token(session or "")
+    if not username:
+        is_api = str(request.url.path).startswith("/api/")
+        if not is_api:
+            is_api = "application/json" in request.headers.get("accept", "")
+        if is_api:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+        raise HTTPException(status_code=status.HTTP_302_FOUND, headers={"Location": "/login"})
+    if not token_is_admin(session or ""):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
     return username

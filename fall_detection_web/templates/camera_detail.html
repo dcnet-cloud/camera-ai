@@ -470,6 +470,8 @@
       .toolbar > * { flex: 1 1 45%; }
       .form-grid { grid-template-columns: 1fr; }
     }
+    /* RBAC viewer: ẩn mọi control thao tác hệ thống (backend vẫn gate API) */
+    body.viewer .admin-only { display: none !important; }
   </style>
   {% include "_sidebar_css.html" %}
 </head>
@@ -481,8 +483,8 @@
         <div><h2 id="pageTitle">Camera Detail</h2><p class="muted" id="pageMeta">Loading camera timeline.</p></div>
         <div class="actions">
           <div class="status-chip"><span id="runDot" class="dot"></span><span id="monitorStatus">Stopped</span></div>
-          <button id="startBtn" class="btn primary" type="button"><span data-icon="play"></span>Start</button>
-          <button id="stopBtn" class="btn danger" type="button"><span data-icon="stop"></span>Stop</button>
+          <button id="startBtn" class="btn primary admin-only" type="button"><span data-icon="play"></span>Start</button>
+          <button id="stopBtn" class="btn danger admin-only" type="button"><span data-icon="stop"></span>Stop</button>
           <button id="refreshAllBtn" class="btn" type="button"><span data-icon="refresh"></span>Refresh</button>
         </div>
       </header>
@@ -492,10 +494,10 @@
             <div><h3 id="cameraName">Camera</h3><p class="muted" id="cameraMeta">Loading source.</p></div>
             <div class="actions">
               <a class="btn" href="/cameras"><span data-icon="arrow-left"></span>Back</a>
-              <button id="toggleBtn" class="btn" type="button">Enable</button>
-              <button id="editBtn" class="btn" type="button"><span data-icon="edit"></span>Edit</button>
-              <button id="snapshotBtn" class="btn" type="button"><span data-icon="camera"></span>Snapshot</button>
-              <button id="testAiBtn" class="btn primary" type="button"><span data-icon="spark"></span>Test AI</button>
+              <button id="toggleBtn" class="btn admin-only" type="button">Enable</button>
+              <button id="editBtn" class="btn admin-only" type="button"><span data-icon="edit"></span>Edit</button>
+              <button id="snapshotBtn" class="btn admin-only" type="button"><span data-icon="camera"></span>Snapshot</button>
+              <button id="testAiBtn" class="btn primary admin-only" type="button"><span data-icon="spark"></span>Test AI</button>
             </div>
           </div>
           <div class="panel-body detail-grid">
@@ -520,7 +522,7 @@
                 <input id="recordingMaskCover" type="checkbox" checked style="width: 16px; min-height: 16px; margin: 0; accent-color: var(--good); cursor: pointer;"> Play Cover
               </label>
               <button id="refreshRecordingsBtn" class="btn" type="button"><span data-icon="refresh"></span>Refresh</button>
-              <button id="clearRecordingsBtn" class="btn danger" type="button"><span data-icon="trash"></span>Clear recordings</button>
+              <button id="clearRecordingsBtn" class="btn danger admin-only" type="button"><span data-icon="trash"></span>Clear recordings</button>
             </div>
           </div>
           <div class="panel-body"><div id="recordingsGrid" class="recordings-grid"></div></div>
@@ -541,7 +543,7 @@
               <select id="eventFilterAI"><option value="">All AI results</option><option>SAFE</option><option>EMERGENCY</option></select>
               <select id="eventPageSize"><option>10</option><option>25</option><option>50</option></select>
               <button id="refreshEventsBtn" class="btn" type="button"><span data-icon="refresh"></span>Refresh</button>
-              <button id="clearEventsBtn" class="btn danger" type="button"><span data-icon="trash"></span>Clear</button>
+              <button id="clearEventsBtn" class="btn danger admin-only" type="button"><span data-icon="trash"></span>Clear</button>
             </div>
           </div>
           <div style="overflow:auto;">
@@ -653,6 +655,8 @@
     document.querySelectorAll("[data-icon]").forEach(el => { el.innerHTML = icons[el.dataset.icon] || ""; });
 
     const routeCameraName = {{ camera_name|tojson }};
+    const IS_ADMIN = {{ is_admin|tojson }};  // viewer=false → body.viewer ẩn .admin-only
+    if (!IS_ADMIN) document.body.classList.add("viewer");
     const state = { index:-1, camera:null, prompts:[], go2rtcUrl:"", eventsPage:1, eventsTotal:0, recordingsPage:1, recordingsTotal:0, liveTimer:null, viewerUrl:"", viewerMode:"image" };
     const $ = id => document.getElementById(id);
     const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[ch]));
@@ -769,7 +773,7 @@
             <div><div class="n" id="yoloOut">–</div><div class="k">Ra</div></div>
             <div><div class="n" id="yoloOcc">–</div><div class="k">Trong phòng</div></div>
           </div>
-          <details class="count-cfg">
+          <details class="count-cfg admin-only">
             <summary>⚙ Cấu hình vạch đếm YOLO</summary>
             <div class="row"><label>Bật đếm YOLO</label><input type="checkbox" id="cfgEnabled"></div>
             <div class="row"><label>Vạch ngang Y (%)</label><input type="number" id="cfgLineY" min="0" max="100" value="51"></div>
@@ -803,7 +807,7 @@
             <div class="row" style="font-size:.8em;color:var(--muted)">Xem trước vẽ vạch (cam) + ROI (xanh lá) + người YOLO detect (đỏ, chấm xanh=sẽ đếm). Kiểm tra vạch trúng cửa & người ngoài kính KHÔNG bị box.</div>
           </details>
         </div>
-        <div class="count-block" style="background:rgba(123,97,255,0.10);border-left-color:#7B61FF">
+        <div class="count-block admin-only" style="background:rgba(123,97,255,0.10);border-left-color:#7B61FF">
           <h4><span data-icon="image"></span>Ảnh đưa AI nhận diện</h4>
           <details class="crop-cfg">
             <summary>⚙ Crop vào người trước khi gửi AI</summary>
@@ -818,7 +822,7 @@
             <div class="row"><button class="btn" onclick="saveCropConfig()">Lưu crop + vùng loại trừ</button></div>
           </details>
         </div>
-        <div class="count-reset">
+        <div class="count-reset admin-only">
           <span class="k">Reset cả 2 block về số người đang trong phòng:</span>
           <input type="number" id="resetOcc" min="0" value="0" style="width:72px">
           <button class="btn" onclick="resetCounting()">Đặt lại hôm nay</button>
