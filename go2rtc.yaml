@@ -1,6 +1,12 @@
 streams:
+  # Full-res cho live view + snapshot Axis (go2rtc_src=cam_door).
   cam_door:
     - rtsp://${CAM_USER}:${CAM_PASS}@${CAM_RTSP_HOST}:${CAM_RTSP_PORT}/axis-media/media.amp
+  # Low-res 720p@15fps cho engine đếm YOLO (cameras.rtsp_url=go2rtc:8554/cam_count).
+  # Decode nhẹ → reader theo kịp stream → capture_ts real-time → timeline đúng.
+  # imgsz YOLO chuẩn hoá 640 nên res nguồn không ảnh hưởng độ chính xác detect.
+  cam_count:
+    - rtsp://${CAM_USER}:${CAM_PASS}@${CAM_RTSP_HOST}:${CAM_RTSP_PORT}/axis-media/media.amp?resolution=1280x720&fps=15
 
 api:
   listen: ":1984"
