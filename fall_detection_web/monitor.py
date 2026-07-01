@@ -1376,32 +1376,63 @@ def _counting_loop(camera: dict[str, Any], line_cfg: dict[str, Any]) -> None:
     # cố ý — YOLO letterbox về imgsz nên upscale thủ công là no-op.
 
     track_sides: dict[int, str] = {}
-    cap = cv2.VideoCapture(rtsp_url)
-    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-    consecutive_failures = 0
-    last_reconnect_log = 0.0
     logger.info("[COUNT] start camera=%s model=%s imgsz=%d conf=%.2f line_y=%.0f%% "
                 "x=[%.0f,%.0f]%% min_disp=%.0f%% invert=%s roi=%s",
                 cam_name, model_name, imgsz, conf, line_y_pct, x_start, x_end,
                 min_disp_pct, invert,
                 ("[%.0f,%.0f,%.0f,%.0f]" % (roi_x1, roi_y1, roi_x2, roi_y2)) if roi_enabled else "off")
+
+    # ── Reader thread: CHỈ decode full-FPS, giữ FRAME MỚI NHẤT + capture_ts (1 slot).
+    # YOLO worker chậm hơn stream (vd 12fps vs 30fps) → nếu để cv2 tự buffer thì frame
+    # dồn → trễ compound (đo được ~1.5×thời-gian-chạy). Ở đây reader GHI ĐÈ slot →
+    # worker luôn lấy frame tươi nhất, drop backlog. Event ghi ts = capture_ts của
+    # frame (KHÔNG phải lúc detect xong) → mốc timeline ĐÚNG thực tế dù xử lý sau.
+    latest: dict[str, Any] = {"frame": None, "ts": None}
+    latest_lock = threading.Lock()
+
+    def _reader() -> None:
+        cap = cv2.VideoCapture(rtsp_url)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        fails = 0
+        last_log = 0.0
+        try:
+            while not counting_stop_event.is_set():
+                ok, fr = cap.read()
+                if not ok:
+                    fails += 1
+                    now = time.time()
+                    if now - last_log > 30:
+                        logger.warning("[COUNT] RTSP read failed camera=%s (failures=%s), reconnect",
+                                       cam_name, fails)
+                        last_log = now
+                    cap.release()
+                    if counting_stop_event.wait(min(2.0 ** fails, 30.0)):
+                        break
+                    cap = cv2.VideoCapture(rtsp_url)
+                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                    continue
+                fails = 0
+                with latest_lock:
+                    latest["frame"] = fr          # ghi đè slot → frame cũ bị drop
+                    latest["ts"] = datetime.now(timezone.utc)
+        finally:
+            cap.release()
+
+    reader = threading.Thread(target=_reader, daemon=True)
+    reader.start()
+
+    last_ts = None
     try:
         while not counting_stop_event.is_set():
-            ok, frame = cap.read()
-            if not ok:
-                consecutive_failures += 1
-                now = time.time()
-                if now - last_reconnect_log > 30:
-                    logger.warning("[COUNT] RTSP read failed camera=%s (failures=%s), reconnect",
-                                   cam_name, consecutive_failures)
-                    last_reconnect_log = now
-                cap.release()
-                if counting_stop_event.wait(min(2.0 ** consecutive_failures, 30.0)):
+            with latest_lock:
+                frame = latest["frame"]
+                cap_ts = latest["ts"]
+            if frame is None or cap_ts is last_ts:
+                # chưa có frame mới (worker nhanh hơn reader) → nghỉ ngắn, tránh busy-spin
+                if counting_stop_event.wait(0.02):
                     break
-                cap = cv2.VideoCapture(rtsp_url)
-                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                 continue
-            consecutive_failures = 0
+            last_ts = cap_ts
 
             # ROI: detect trên vùng crop; line-crossing tính theo toạ độ crop.
             det_frame = frame
@@ -1441,16 +1472,16 @@ def _counting_loop(camera: dict[str, Any], line_cfg: dict[str, Any]) -> None:
                         snap_path = None
                         try:
                             db.COUNTING_SNAPS_DIR.mkdir(parents=True, exist_ok=True)
-                            now_utc = datetime.now(timezone.utc)
-                            fname = f"{now_utc.strftime('%Y%m%dT%H%M%S%f')}_yolo_{direction}.jpg"
+                            fname = f"{cap_ts.strftime('%Y%m%dT%H%M%S%f')}_yolo_{direction}.jpg"
                             p = db.COUNTING_SNAPS_DIR / fname
                             cv2.imwrite(str(p), frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
                             snap_path = str(p)
                         except Exception:
                             pass
+                        # ts = capture_ts của frame → timeline đúng thực tế (không phải lúc detect xong)
                         db.insert_counting_event(
                             cam_id, direction,
-                            datetime.now(timezone.utc), "yolo", track_id=str(tid),
+                            cap_ts, "yolo", track_id=str(tid),
                             snapshot_path=snap_path)
                         logger.info("[COUNT] camera=%s track=%s -> %s", cam_name, tid, direction)
                     if new_side is not None:
@@ -1462,7 +1493,7 @@ def _counting_loop(camera: dict[str, Any], line_cfg: dict[str, Any]) -> None:
     except Exception:
         logger.exception("[COUNT] loop failed camera=%s", cam_name)
     finally:
-        cap.release()
+        reader.join(timeout=3)   # reader tự release cap khi counting_stop_event set
         logger.info("[COUNT] stop camera=%s", cam_name)
 
 

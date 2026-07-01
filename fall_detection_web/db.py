@@ -160,7 +160,7 @@ def init_db() -> None:
         conn.execute("""
             INSERT INTO cameras (cam_uid, name, rtsp_url, go2rtc_src, model, location)
             VALUES ('B8A44F4627CE', 'Cửa cty HCM',
-                    'rtsp://go2rtc:8554/cam_door', 'cam_door', 'M3216-LVE', 'HCM')
+                    'rtsp://go2rtc:8554/cam_count', 'cam_door', 'M3216-LVE', 'HCM')
             ON CONFLICT (cam_uid) DO NOTHING
         """)
         # ── Phase 2: Re-ID group schema (module optional, OFF mặc định) ──
