@@ -1,5 +1,6 @@
 {
   "_comment": "Nguồn sự thật về trạng thái feature cho agent (Harness Engineering). status: not-started | in-progress | blocked | done. QUY TẮC: mỗi lúc chỉ 1 feature in-progress. 'done' bắt buộc có 'evidence' (PR/log/proof). Cập nhật file này + progress.md trước khi kết thúc phiên.",
+  "_status": "⏸️ POC TẠM NGỪNG (2026-07-01). Prod camera-ai LIVE ổn định https://camera-test.dcnet.vn — đếm Axis+YOLO + thumbnail + feed sạch + timeline realtime. feat-001..007 done; feat-008 deferred. Việc chưa đóng khi resume: (a) đo accuracy live Axis-vs-YOLO ≥1h (feat-007 gate — engine đã fix nhưng chưa đo MAE); (b) ops: O6 cron backup postgres / set go2rtc_url→/live cho live-view / tắt instance lạ 171.243.48.224 (connect sai-pass). KHÔNG có feature in-progress.",
   "features": [
     {
       "id": "feat-001",
@@ -54,10 +55,8 @@
       "name": "Sửa độ chính xác đếm YOLO (thread latest-frame + substream)",
       "description": "YOLO đếm sót ~75% so Axis do _counting_loop xử lý 9.8 FPS < nguồn 17 FPS → backlog frame cũ/giật → đứt track ID → sót lượt (tệ nhất hướng IN). Fix: thread đọc riêng giữ frame mới nhất (1-slot) + dùng substream/cam thật thay rtsp://go2rtc restream + imgsz hợp lý.",
       "dependencies": ["feat-005"],
-      "status": "in-progress",
-      "spec": "docs/specs/2026-06-30-yolo-counting-accuracy-fix-design.md",
-      "plan": "docs/plans/2026-06-30-yolo-counting-accuracy-fix.md",
-      "evidence": "ROOT CAUSE (đo 2026-06-30): go2rtc 16.9 FPS/0 lỗi (không nghẽn); loop sequential 9.8 FPS → backlog 8.5s tăng vô hạn. FIX implement trên nhánh feat/yolo-counting-thread-fix: _LatestFrameGrabber (thread giữ frame mới nhất) + _counting_loop xử lý theo seq mới. Verify prod (read-only probe): backlog=0, luôn realtime (skip stale không queue); init.sh OK. CHỜ (gate đóng): (1) user chốt feat-008; (2) đo accuracy live Axis vs YOLO ≥1h ở deploy + substream. CHƯA deploy/merge."
+      "status": "done",
+      "evidence": "PR #14 (fix/counting-realtime-grab-latest) MERGED + DEPLOYED prod 2026-07-01 — supersede PR #13 (đã đóng). Fix: (1) reader thread grab-latest (1-slot, ghi đè → drop backlog); (2) event+snapshot dùng capture_ts (timeline đúng thực tế, không phải lúc detect); (3) stream đếm riêng 720p@15 'cam_count' (go2rtc) → reader decode 28fps≥15 theo kịp realtime (full-res 2688 chỉ 23<30 vẫn hụt). Verify prod: reader 28fps≥15, RAM 2.79GiB→733MiB (hết backlog dồn), engine ổn định no-crash. ⚠️ CHƯA đo accuracy MAE live Axis-vs-YOLO ≥1h (gate còn hở — deferred do POC tạm ngừng). Kèm session này: fix Axis-thumb (PR #12) + vạch YOLO khớp choke cửa (line_y=52 x[47,68]) + tắt overlay burn-in cam (VAPIX Image.I0.Appearance.Overlays=off)."
     },
     {
       "id": "feat-008",
@@ -65,7 +64,7 @@
       "description": "Cam có native detect (Axis) → dùng Axis, TẮT yolo_counting (+ tắt fall_detection nếu chỉ để đếm). Chỉ cam KHÔNG detect mới bật YOLO. Cần quyết: có triển khai cam non-detect (cần YOLO thật) không.",
       "dependencies": ["feat-007"],
       "status": "blocked",
-      "evidence": "BLOCKER: chờ user quyết có deploy cam non-detect hay không → quyết định mức đầu tư cho feat-007."
+      "evidence": "DEFERRED — POC tạm ngừng 2026-07-01. Chưa quyết có deploy cam non-detect (cần YOLO thật) hay không. Engine YOLO đã fix (feat-007) sẵn sàng nếu resume. Hiện prod chỉ 1 cam Axis-native (đếm Axis chính xác); YOLO chạy song song làm đối chứng."
     }
   ]
 }

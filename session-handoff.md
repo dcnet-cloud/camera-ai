@@ -1,38 +1,37 @@
-# Session Handoff — review sáng 2026-07-01
+# Session Handoff — ⏸️ POC TẠM NGỪNG (2026-07-01)
 
-## Current Objective
-- **Goal:** feat-007 — sửa độ chính xác đếm YOLO (sót ~75% so Axis do backlog frame).
-- **Status:** **CODE XONG trên nhánh riêng + PR mở. CHƯA merge, CHƯA deploy.** Chờ bạn review.
-- **Branch:** `feat/yolo-counting-thread-fix` (off `main` @ harness commit). PR: xem link tôi gửi qua notification.
+## Trạng thái chốt
+- **POC camera-ai tạm ngừng** ở trạng thái **prod LIVE, ổn định**. Không có việc dở dang bắt buộc.
+- Prod: `https://camera-test.dcnet.vn` (VM `ssh camera`) — đếm Axis + YOLO + thumbnail + feed sạch + timeline realtime. main = `7f22b9a`, nhánh sạch.
+- feat-001..007 done; feat-008 deferred. Chi tiết `feature_list.json` + `progress.md`.
 
-## Làm gì qua đêm (autonomous, theo flow dcnet-workflow)
-1. ✅ Chạy thử **tối ưu description** skill dcnet-workflow → kết quả: **giữ nguyên** (benchmark trong env không đo được trigger — recall 0% mọi candidate = artifact; KHÔNG đổi SKILL.md). Trung thực: trial cho thấy harness đo trigger không chạy ở đây.
-2. ✅ feat-007: viết **spec** [docs/specs/2026-06-30-yolo-counting-accuracy-fix-design.md](docs/specs/2026-06-30-yolo-counting-accuracy-fix-design.md) + **plan** [docs/plans/2026-06-30-yolo-counting-accuracy-fix.md](docs/plans/2026-06-30-yolo-counting-accuracy-fix.md).
-3. ✅ **Implement** `_LatestFrameGrabber` (thread giữ frame mới nhất) + refactor `_counting_loop` trong [fall_detection_web/monitor.py](fall_detection_web/monitor.py). Chỉ sửa 1 file. Giữ nguyên logic crossing/snapshot/lifecycle.
-4. ✅ **Verify cơ chế** (read-only trên prod, KHÔNG đổi prod): probe → threaded reader **backlog=0**, luôn realtime (skip stale không queue, lag ~0.4 frame) vs sequential cũ 8.5s tăng dần. `init.sh` OK.
+## Session cuối (2026-07-01) làm gì
+1. ✅ **Fix Axis-thumb + YOLO-data sau cutover** (PR #12): seed `go2rtc_src=cam_door` + `rtsp_url` reachable; collector mount `fdw_data` + `COUNTING_SNAPS_DIR`. → cả 2 counter có thumbnail.
+2. ✅ **Vạch YOLO khớp choke cửa**: `line_y=52, x[47,68]` (user vẽ vạch vàng xác nhận lối ra/vào). Config prod `cameras.yolo_counting`.
+3. ✅ **Feed sạch**: tắt overlay burn-in cam Axis — VAPIX `Image.I0.Appearance.Overlays=off` (cần restart go2rtc mới ăn). KHÔNG ảnh hưởng đếm MQTT. → YOLO ăn frame gốc.
+4. ✅ **feat-007 fix trễ YOLO** (PR #14, supersede + đóng PR #13): reader thread grab-latest (drop backlog) + capture-timestamp (timeline đúng) + stream đếm 720p@15 `cam_count` (reader theo kịp). Verify: reader 28fps≥15, RAM 2.79GiB→733MiB, engine ổn định.
+5. ✅ Update state + CLAUDE.md; đóng PR #13 (+ xoá nhánh `feat/yolo-counting-thread-fix`).
 
-## Verification Evidence
-| Check | Kết quả |
-|---|---|
-| `python3 -m py_compile monitor.py` + `./init.sh` | OK |
-| Probe threaded reader (prod container, read-only) | grabber 352f/20s, processed 276, **backlog 0**, lag ~0.4 frame |
-| Accuracy thật (Axis vs YOLO) | ⏳ **CHƯA đo** — cần deploy + chạy live ≥1h (gate đóng feat-007) |
+## Việc CHƯA đóng (khi resume)
+| # | Việc | Ghi chú |
+|---|------|---------|
+| 1 | **Đo accuracy live Axis-vs-YOLO ≥1h** | feat-007 gate còn hở. Engine đã fix realtime nhưng chưa đo MAE IN/OUT. Chạy 1 config cố định, không restart, ≥1h. |
+| 2 | **feat-008** — quyết cam non-detect | Có triển khai cam không-native-detect (cần YOLO thật) không → quyết giá trị engine YOLO. |
+| 3 | **Miss người VÀO** ở cửa (YOLO) | Người nhỏ/xa lúc băng vạch → sót IN. Nếu cần: imgsz 960/yolov8s (đánh đổi CPU). |
+| 4 | **Ops user tự xử** | O6 cron backup postgres; `go2rtc_url`→`/live` live-view; tắt instance lạ `171.243.48.224`. |
+| 5 | **AI Vision prod** | Dev chạy (Gemini/9router); prod chưa cấu hình + chưa nhập Telegram token. |
 
-## ⚠️ CẦN BẠN QUYẾT (feat-008) trước khi merge/deploy
-**Có triển khai camera KHÔNG-native-detect (buộc dùng YOLO đếm) không?**
-- **Có** → merge PR → deploy: rebuild image + đổi `cameras.rtsp_url`→substream cam thật + chạy đối chứng ≥1h. Tôi làm tiếp khi bạn OK.
-- **Không (toàn cam Axis)** → có thể KHÔNG merge; chỉ tắt `yolo_counting` trên cam Axis, dùng Axis (chính xác ~99%, ~0 CPU). feat-007 đóng "won't-deploy". PR vẫn hữu ích cho công cụ dual-counting test.
+## Rủi ro mang theo
+- **KHÔNG rollback về DCNET** (DB cũ đã xoá). Deploy phải verify kỹ.
+- **Hạ tầng chung GIỮ**: `mosquitto` (cam Axis ingest — camera-ai đọc ké) + `caddy` KHÔNG được tắt.
+- Prod DB mới tinh — config YOLO/AI không sang từ dev.
 
-## Files Changed (trên nhánh, chưa merge)
-- `fall_detection_web/monitor.py` (threaded reader)
-- `docs/specs/2026-06-30-yolo-counting-accuracy-fix-design.md`, `docs/plans/2026-06-30-yolo-counting-accuracy-fix.md` (mới)
-- `feature_list.json` (feat-007 evidence), `progress.md`, `session-handoff.md`
+## Resume Startup
+1. Đọc section Harness đầu `CLAUDE.md` → `feature_list.json` (`_status`) + `progress.md` (mục "Khi resume") + handoff này.
+2. `./init.sh` verify baseline. Prod access `ssh camera`.
+3. Nếu resume feat-007 gate: deploy đã sẵn, chỉ cần chạy đo accuracy ≥1h. Nếu resume feat-008: brainstorm scope cam non-detect.
+4. Prod đang chạy bình thường — KHÔNG cần can thiệp gì để giữ live.
 
-## Next Session Startup
-1. Đọc section Harness đầu `CLAUDE.md` → `feature_list.json` + `progress.md` + handoff này.
-2. Xem PR `feat/yolo-counting-thread-fix` (diff monitor.py + spec/plan).
-3. Chốt feat-008 → tôi merge+deploy hoặc đóng won't-deploy.
-4. KHÔNG có gì đang chạy trên prod khác thường; prod vẫn live bình thường (chưa đụng).
-
-## Recommended Next Step
-Review PR + trả lời feat-008. Nếu "Có": tôi rebuild image + đổi rtsp_url substream + deploy + đo Axis-vs-YOLO ≥1h để đóng feat-007.
+## Rollback nhanh (nếu cần)
+- Overlay cam: VAPIX `Image.I0.Appearance.Overlays=all` (`--anyauth`, root, `https://<CAM_IP>:8443`).
+- Vạch/engine YOLO: sửa `cameras.yolo_counting` qua UI `/camera/{name}` hoặc tắt `enabled`.
